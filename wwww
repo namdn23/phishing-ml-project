@@ -19,3 +19,18 @@ sudo chmod +x /usr/local/bin/chrome-linux64/chrome
 
 # Tạo symbolic link để dễ gọi
 sudo ln -s /usr/local/bin/chrome-linux64/chrome /usr/bin/google-chrome
+
+
+
+# 1. Kiểm tra xem link hiện tại đang trỏ đi đâu (nếu có)
+readlink /usr/bin/google-chrome
+
+# 2. Xóa symbolic link cũ (Chỉ khi bạn biết chắc đó là link cũ)
+sudo rm /usr/bin/google-chrome
+
+# 3. Tạo lại symbolic link (Trỏ đến file thực thi 'chrome' bên trong thư mục)
+# Đảm bảo file thực thi Chrome của bạn nằm ở: /usr/local/bin/chrome-linux64/chrome
+sudo ln -s /usr/local/bin/chrome-linux64/chrome /usr/bin/google-chrome
+
+# 4. Kiểm tra lại việc tạo link đã thành công chưa
+/usr/bin/google-chrome --version
