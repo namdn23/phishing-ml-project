@@ -6,7 +6,7 @@ sudo apt upgrade -y
 
 # 2. Cài đặt các dependencies phổ biến của Playwright
 sudo apt install -y libnss3 libfontconfig libdbus-1-3 libatk-bridge2.0-0 libgtk-3-0 libgbm-dev
-
+playwright install --with-deps
 # Trong Terminal trên Kali Linux
 rm processed_urls_log.txt
 rm cleaned_extracted_data.csv
