@@ -1,5 +1,5 @@
 # =================================================================
-# run_extraction_final_selenium.py - BẢN CODE ĐÃ SỬA LỖI SELENIUM & ENCODING
+# run_extraction_final_debug.py - BẢN CODE SỬA LỖI SELENIUM VÀ CẬP NHẬT LOG CHI TIẾT
 # =================================================================
 import pandas as pd
 import numpy as np
@@ -12,7 +12,7 @@ import re
 from datetime import datetime
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.chrome.service import Service as ChromeService # Cần thiết
+from selenium.webdriver.chrome.service import Service as ChromeService
 import imagehash
 from PIL import Image
 import io
@@ -32,16 +32,18 @@ sys.dont_write_bytecode = True
 # --- 1. CẤU HÌNH VÀ HẰNG SỐ ---
 RAW_CSV_FILE = 'PhiUSIIL_Phishing_URL_Dataset.csv'
 OUTPUT_CSV_FILE = 'cleaned_extracted_data.csv'
-TEMP_LOG_FILE = 'processed_urls_log.txt'
+
+# FILE LOG MỚI: Ghi tất cả các đặc trưng đã trích xuất (kể cả thất bại Selenium)
+DETAILED_LOG_FILE = 'temp_extraction_log.csv' 
+
 MAX_WORKERS = 8
 BUFFER_SIZE = 500
 
 TARGET_PHASH = imagehash.hex_to_hash('9880e61f1c7e0c4f') 
 
 # === ❗ KHAI BÁO ĐƯỜNG DẪN SELENIUM (QUAN TRỌNG) ❗ ===
-# Dựa trên ảnh của bạn:
+# Dựa trên cấu hình trên Kali Linux của bạn:
 CHROME_DRIVER_PATH = "/usr/local/bin/chromedriver" 
-# File Chrome thực thi nằm trong thư mục chrome-linux64/
 CHROME_BINARY_PATH = "/usr/local/bin/chrome-linux64/chrome" 
 # =====================================================
 
@@ -77,7 +79,8 @@ class FeatureExtractor:
     
     def __init__(self, url: str):
         self.url: str = self._normalize_url(url)
-        self.features: Dict[str, Any] = {}
+        # Bổ sung cột 'url' vào features để dễ dàng debug
+        self.features: Dict[str, Any] = {'url': url} 
         self.response: Optional[requests.Response] = None
         self.soup: Optional[BeautifulSoup] = None
         self.current_domain: Optional[str] = None
@@ -219,6 +222,8 @@ class FeatureExtractor:
             'HasExternalFormSubmit': 0, 'DomainTitleMatchScore': 0.0, 'HasCopyrightInfo': 0,
             'V8_Total_IFrames': 0, 'V9_Has_Hidden_IFrame': 0, 'V7_Text_Readability_Score': 0.0,
             'V6_JS_Entropy': 0.0,
+            'V1_PHash_Distance': 0.5, # Giá trị mặc định khi Selenium thất bại
+            'V2_Layout_Similarity': 0.5, # Giá trị mặc định khi Selenium thất bại
         }
         self.features.update(default_features)
         
@@ -286,13 +291,8 @@ class FeatureExtractor:
     def _get_visual_and_complex_features(self) -> None:
         """Sử dụng Selenium để render và trích xuất các đặc trưng động (V1, V2)."""
         
-        phash_distance = 0.5
-        layout_similarity = 0.5
-        self.visual_extraction_successful = False
-
+        # Nếu HTTP thất bại, giữ nguyên giá trị mặc định 0.5 đã đặt ở _get_content_features
         if not self.http_extraction_successful:
-            self.features['V1_PHash_Distance'] = phash_distance
-            self.features['V2_Layout_Similarity'] = layout_similarity
             return
             
         def _calculate_phash_distance(image_data: bytes) -> float:
@@ -326,17 +326,17 @@ class FeatureExtractor:
             chrome_options.add_argument("--disable-dev-shm-usage")
             chrome_options.add_argument(f"user-agent={random.choice(USER_AGENTS)}")
             
-            # 2. Cấu hình Đường dẫn Chrome Binary Tường minh (Giải quyết Lỗi 58acdd.png)
+            # 2. Cấu hình Đường dẫn Chrome Binary Tường minh
             if os.path.exists(CHROME_BINARY_PATH):
                 chrome_options.binary_location = CHROME_BINARY_PATH 
             else:
                 print(f"Lỗi cấu hình: KHÔNG TÌM THẤY Chrome Binary tại {CHROME_BINARY_PATH}")
-                return # Thoát nếu không tìm thấy Chrome
+                return 
 
-            # 3. Cấu hình ChromeDriver Service Tường minh (Giải quyết Lỗi 582254.png & 58b09d.png)
+            # 3. Cấu hình ChromeDriver Service Tường minh
             if not os.path.exists(CHROME_DRIVER_PATH):
                 print(f"Lỗi cấu hình: KHÔNG TÌM THẤY ChromeDriver tại {CHROME_DRIVER_PATH}")
-                return # Thoát nếu không tìm thấy ChromeDriver
+                return 
                 
             service = ChromeService(executable_path=CHROME_DRIVER_PATH)
             
@@ -348,16 +348,15 @@ class FeatureExtractor:
                 driver.get(self.url) 
                 self.visual_extraction_successful = True
 
-                # 1. TRÍCH XUẤT V1 (PHash Distance)
+                # TRÍCH XUẤT V1 (PHash Distance) & V2 (Layout Similarity)
                 screenshot_data = driver.get_screenshot_as_png()
-                phash_distance = _calculate_phash_distance(screenshot_data)
+                self.features['V1_PHash_Distance'] = _calculate_phash_distance(screenshot_data)
 
-                # 2. TRÍCH XUẤT V2 (Layout Similarity)
                 rendered_html = driver.page_source
                 rendered_soup = BeautifulSoup(rendered_html, 'html.parser')
-                layout_similarity = _calculate_layout_similarity(rendered_soup)
+                self.features['V2_Layout_Similarity'] = _calculate_layout_similarity(rendered_soup)
                 
-                # Cập nhật DOM features dựa trên Selenium 
+                # Cập nhật DOM features dựa trên Selenium (vì nội dung có thể load sau JS)
                 def _extract_dom_form_features_dynamic(soup: BeautifulSoup, current_domain: str) -> Dict[str, Any]:
                     f: Dict[str, Any] = {}
                     f['HasPasswordField'] = 1 if len(soup.find_all('input', type='password')) > 0 else 0
@@ -377,21 +376,19 @@ class FeatureExtractor:
 
 
             except Exception as e:
-                # In ra lỗi cụ thể nếu quá trình driver.get() thất bại
                 print(f"⚠️ Lỗi Selenium khi xử lý {self.url}: {e}")
+                # Giữ nguyên giá trị mặc định 0.5 đã đặt ở _get_content_features
                 pass 
 
             finally:
                 if driver: driver.quit()
         
         except Exception as e_init:
-            # In ra lỗi nếu không thể khởi tạo driver (lỗi phổ biến nhất)
             print(f"❌ Lỗi Khởi tạo WebDriver: {e_init}")
-                
-        self.features['V1_PHash_Distance'] = phash_distance
-        self.features['V2_Layout_Similarity'] = layout_similarity
+            # Giữ nguyên giá trị mặc định 0.5 đã đặt ở _get_content_features
 
-    def get_all_features(self, label: int) -> Optional[np.ndarray]:
+    def get_all_features(self, label: int) -> Optional[Dict[str, Any]]:
+        """Trả về toàn bộ dictionary đặc trưng đã trích xuất được."""
         try:
             self._fetch_url_content()
             self._get_url_domain_features()
@@ -400,20 +397,18 @@ class FeatureExtractor:
             
             self.features['label'] = label
             
-            final_array = np.array([self.features.get(key, 0.0) for key in FEATURE_ORDER])
-            
-            return final_array
+            return self.features
         except Exception:
-            return None
+            # Chỉ trả về một dictionary rỗng hoặc các thông tin cơ bản nếu có lỗi quá lớn
+            self.features['label'] = label
+            return self.features
 
 # =================================================================
-# III. LOGIC CHẠY ĐA LUỒNG VÀ RESUME (Giữ nguyên)
+# III. LOGIC CHẠY ĐA LUỒNG VÀ RESUME (ĐÃ SỬA LOGIC GHI LOG)
 # =================================================================
-# ... (Phần load_data_for_extraction, extract_features_worker, append_to_csv_and_log, check_internet_connectivity, run_multiprocess_extraction giữ nguyên)
-# -----------------------------------------------------------------
 
 def load_data_for_extraction(file_path: str) -> pd.DataFrame:
-    """Đọc dữ liệu thô và lọc bỏ các URL đã được xử lý (dựa trên log)."""
+    """Đọc dữ liệu thô và lọc bỏ các URL đã được xử lý (dựa trên DETAILED_LOG_FILE)."""
     if not os.path.exists(file_path):
         print(f"❌ Lỗi: Không tìm thấy file CSV: {file_path}")
         return pd.DataFrame()
@@ -432,7 +427,7 @@ def load_data_for_extraction(file_path: str) -> pd.DataFrame:
             continue
     
     if not success:
-        print(f"❌ Thất bại: Không thể đọc file CSV với bất kỳ mã hóa nào. Vui lòng kiểm tra mã hóa file nguồn.")
+        print(f"❌ Thất bại: Không thể đọc file CSV với bất kỳ mã hóa nào.")
         return pd.DataFrame()
 
     COLUMNS_TO_KEEP = ['URL', 'label']
@@ -446,18 +441,16 @@ def load_data_for_extraction(file_path: str) -> pd.DataFrame:
     df_base.rename(columns={'URL': 'url'}, inplace=True)
 
     processed_urls = set()
-    if os.path.exists(TEMP_LOG_FILE):
+    if os.path.exists(DETAILED_LOG_FILE):
         try:
-            with open(TEMP_LOG_FILE, 'r', encoding='utf-8', errors='ignore') as f: 
-                for line in f:
-                    url_to_add = line.strip()
-                    if url_to_add:
-                        processed_urls.add(url_to_add)
-            print(f"✅ Tải log thành công. Đã bỏ qua các ký tự hỏng nếu có.")
+            # Đọc file log chi tiết để lấy danh sách URL đã xử lý
+            df_log = pd.read_csv(DETAILED_LOG_FILE, usecols=['url'], encoding='utf-8', encoding_errors='ignore')
+            processed_urls = set(df_log['url'].astype(str).tolist())
+            print(f"✅ Tải log chi tiết thành công: {len(processed_urls)} URL đã được xử lý.")
             
         except Exception as e:
-            print(f"⚠️ Cảnh báo: Lỗi nghiêm trọng khi đọc file log {TEMP_LOG_FILE}. Đang xóa log để bắt đầu lại. Lỗi: {e}")
-            os.remove(TEMP_LOG_FILE) 
+            print(f"⚠️ Cảnh báo: Lỗi khi đọc file log chi tiết {DETAILED_LOG_FILE}. Đang xóa log để bắt đầu lại. Lỗi: {e}")
+            os.remove(DETAILED_LOG_FILE) 
             processed_urls = set()
     
     df_remaining = df_base[~df_base['url'].isin(processed_urls)]
@@ -472,34 +465,53 @@ def load_data_for_extraction(file_path: str) -> pd.DataFrame:
 
     return df_remaining
 
-def extract_features_worker(row: pd.Series) -> Optional[Tuple[str, np.ndarray]]:
+def extract_features_worker(row: pd.Series) -> Optional[Tuple[str, Optional[Dict[str, Any]]]]:
     url = row['url']
     label = row['label']
     
     extractor = FeatureExtractor(url)
-    result_array = extractor.get_all_features(label)
     
-    if result_array is not None:
-        return (url, result_array)
-    else:
-        return (url, None)
+    # Hàm get_all_features() giờ trả về toàn bộ dictionary (thành công hoặc thất bại)
+    result_dict = extractor.get_all_features(label)
+    
+    return (url, result_dict)
 
-def append_to_csv_and_log(results_buffer: List[Tuple[str, Optional[np.ndarray]]], file_exists: bool):
+
+def append_to_csv_and_log(results_buffer: List[Tuple[str, Optional[Dict[str, Any]]]], output_file_exists: bool):
     
-    successful_results = [res[1] for res in results_buffer if res[1] is not None]
+    successful_results = []
     
+    for url, features_dict in results_buffer:
+        if features_dict:
+            # Điều kiện thành công: V1 và V2 đã được trích xuất (khác giá trị mặc định 0.5)
+            # Chúng ta sử dụng giá trị làm tròn để tránh sai số floating point
+            if round(features_dict.get('V1_PHash_Distance', 0.5), 1) != 0.5:
+                # Nếu trích xuất động thành công, chuyển dictionary thành array theo thứ tự
+                final_array = np.array([features_dict.get(key, 0.0) for key in FEATURE_ORDER])
+                successful_results.append(final_array)
+    
+    # 1. Ghi vào file CSV chính (cleaned_extracted_data.csv)
     if successful_results:
         df_new = pd.DataFrame(np.vstack(successful_results), columns=FEATURE_ORDER)
-        
-        header = not file_exists
+        header = not output_file_exists
         df_new.to_csv(OUTPUT_CSV_FILE, mode='a', header=header, index=False)
-        
-    processed_urls = [res[0] for res in results_buffer]
     
-    with open(TEMP_LOG_FILE, 'a', encoding='utf-8') as f: 
-        f.write('\n'.join(processed_urls) + '\n')
-            
+    # 2. Ghi chi tiết tất cả các đặc trưng đã trích xuất vào file LOG (temp_extraction_log.csv)
+    
+    all_extracted_dicts = [d for u, d in results_buffer if d is not None]
+    
+    if all_extracted_dicts:
+        # Bổ sung các cột bị thiếu trong FEATURE_ORDER (ví dụ: 'url')
+        all_columns = sorted(list(set(col for d in all_extracted_dicts for col in d)))
+        df_log = pd.DataFrame(all_extracted_dicts, columns=all_columns)
+        
+        log_file_exists = os.path.exists(DETAILED_LOG_FILE)
+        log_header = not log_file_exists
+        
+        df_log.to_csv(DETAILED_LOG_FILE, mode='a', header=log_header, index=False)
+        
     return len(successful_results)
+
 
 def check_internet_connectivity():
     print("--- 🩺 Kiểm tra kết nối mạng...")
@@ -507,9 +519,8 @@ def check_internet_connectivity():
         requests.get("https://www.google.com", timeout=15) 
         print("✅ Kiểm tra kết nối mạng: OK.")
     except requests.exceptions.RequestException:
-        print("❌ KIỂM TRA MẠNG THẤT BẠI: Script không thể kết nối Internet (HTTP/HTTPS).")
-        print("   Vui lòng kiểm tra cài đặt NAT của VMWare.")
-        print("   Không thể trích xuất nếu không có mạng.")
+        print("❌ KIỂM TRA MẠNG THẤT BẠI: Script không thể kết nối Internet.")
+        print("   Vui lòng kiểm tra cài đặt NAT/Proxy.")
         sys.exit(1)
 
 
