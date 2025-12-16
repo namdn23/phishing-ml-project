@@ -1,5 +1,5 @@
 # =================================================================
-# run_extraction_final_selenium.py - BẢN CODE HOÀN CHỈNH SỬ DỤNG SELENIUM
+# run_extraction_final_selenium.py - BẢN CODE ĐÃ SỬA LỖI ENCODING VÀ TRÍCH XUẤT 23 FEATURES + LABEL
 # =================================================================
 import pandas as pd
 import numpy as np
@@ -402,9 +402,10 @@ def load_data_for_extraction(file_path: str) -> pd.DataFrame:
     
     for enc in ENCODINGS_TO_TRY:
         try:
-            df_raw = pd.read_csv(file_path, encoding=enc)
+            # THÊM encoding_errors='ignore' ĐỂ BỎ QUA KÝ TỰ HỎNG TRONG FILE GỐC
+            df_raw = pd.read_csv(file_path, encoding=enc, encoding_errors='ignore')
             success = True
-            print(f"✅ Đọc file CSV thành công với mã hóa: {enc}")
+            print(f"✅ Đọc file CSV thành công với mã hóa: {enc} (Đã bỏ qua lỗi ký tự).")
             break
         except Exception:
             continue
@@ -415,6 +416,13 @@ def load_data_for_extraction(file_path: str) -> pd.DataFrame:
     # -----------------------------------------------
 
     COLUMNS_TO_KEEP = ['URL', 'label']
+    
+    # Kiểm tra cột để đảm bảo có thể trích xuất
+    if not all(col in df_raw.columns for col in COLUMNS_TO_KEEP):
+        missing_cols = [col for col in COLUMNS_TO_KEEP if col not in df_raw.columns]
+        print(f"❌ Lỗi: File CSV nguồn thiếu các cột cần thiết: {missing_cols}")
+        return pd.DataFrame()
+
     df_base = df_raw[COLUMNS_TO_KEEP].copy()
     df_base.rename(columns={'URL': 'url'}, inplace=True)
 
@@ -488,8 +496,8 @@ def check_internet_connectivity():
         print("✅ Kiểm tra kết nối mạng: OK.")
     except requests.exceptions.RequestException:
         print("❌ KIỂM TRA MẠNG THẤT BẠI: Script không thể kết nối Internet (HTTP/HTTPS).")
-        print("   Vui lòng kiểm tra cài đặt NAT của VMWare.")
-        print("   Không thể trích xuất nếu không có mạng.")
+        print("   Vui lòng kiểm tra cài đặt NAT của VMWare.")
+        print("   Không thể trích xuất nếu không có mạng.")
         sys.exit(1)
 
 
