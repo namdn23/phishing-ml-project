@@ -1,5 +1,5 @@
 # =================================================================
-# run_extraction_final_debug.py - BẢN CODE SỬA LỖI SELENIUM VÀ CẬP NHẬT LOG CHI TIẾT
+# run_extraction_final_merge.py - BẢN CODE CHỈ TRÍCH XUẤT CÁC FEATURE MỚI VÀ MERGE VỚI DATA THÔ
 # =================================================================
 import pandas as pd
 import numpy as np
@@ -31,10 +31,10 @@ sys.dont_write_bytecode = True
 
 # --- 1. CẤU HÌNH VÀ HẰNG SỐ ---
 RAW_CSV_FILE = 'PhiUSIIL_Phishing_URL_Dataset.csv'
-OUTPUT_CSV_FILE = 'cleaned_extracted_data.csv'
+OUTPUT_CSV_FILE = 'merged_extracted_data_final.csv' # File Output CUỐI CÙNG đã merge
 
-# FILE LOG MỚI: Ghi tất cả 23 đặc trưng đã trích xuất (kể cả thất bại Selenium)
-DETAILED_LOG_FILE = 'temp_extraction_log.csv' 
+# FILE LOG: Ghi lại các đặc trưng MỚI đã trích xuất
+DETAILED_LOG_FILE = 'temp_new_features_log.csv' 
 
 MAX_WORKERS = 8
 BUFFER_SIZE = 500
@@ -47,17 +47,24 @@ CHROME_DRIVER_PATH = "/usr/local/bin/chromedriver"
 CHROME_BINARY_PATH = "/usr/local/bin/chrome-linux64/chrome" 
 # =====================================================
 
-FEATURE_ORDER: List[str] = [
+# Các đặc trưng TỒN TẠI trong file thô cần được CẬP NHẬT/GHI ĐÈ (Tính lại cho chính xác)
+# Cần tính lại vì: DomainTitleMatchScore, Has*FormSubmit, Has*Button, HasPasswordField, HasSocialNet, HasDescription, NoOfDegitsInURL, IsHTTPS, HasCopyrightInfo
+OVERWRITE_FEATURES = [
     'NoOfDegitsInURL', 'HasDescription', 'HasSocialNet', 'HasPasswordField', 'HasSubmitButton',
-    'HasExternalFormSubmit', 'DomainTitleMatchScore', 'IsHTTPS', 'HasCopyrightInfo',
+    'HasExternalFormSubmit', 'DomainTitleMatchScore', 'IsHTTPS', 'HasCopyrightInfo', 'label'
+]
+
+# Các đặc trưng MỚI cần được trích xuất (Không tồn tại trong file thô)
+NEW_FEATURES = [
     'V10_HTTP_Extraction_Success', 'V11_WHOIS_Extraction_Success', 'V1_PHash_Distance',
     'V2_Layout_Similarity', 'V6_JS_Entropy', 'V7_Text_Readability_Score', 'V8_Total_IFrames',
     'V9_Has_Hidden_IFrame', 'V5_TLS_Issuer_Reputation', 'V3_Domain_Age_Days',
-    'V4_DNS_Volatility_Count', 'Is_Top_1M_Domain',
-    'V22_IP_Subdomain_Pattern',
-    'V23_Entropy_Subdomain',
-    'label'
+    'V4_DNS_Volatility_Count', 'Is_Top_1M_Domain', 'V22_IP_Subdomain_Pattern',
+    'V23_Entropy_Subdomain'
 ]
+
+# Thứ tự Output trong file log mới (DETAILED_LOG_FILE)
+FEATURE_ORDER_LOG = ['url'] + OVERWRITE_FEATURES + NEW_FEATURES 
 
 # USER-AGENTS CHO NGỤY TRANG BOT
 USER_AGENTS = [
@@ -70,7 +77,7 @@ USER_AGENTS = [
 # -------------------------------------
 
 # =================================================================
-# II. LỚP TRÍCH XUẤT ĐẶC TRƯNG (FEATURE EXTRACTOR) - LOGIC ĐẦY ĐỦ
+# II. LỚP TRÍCH XUẤT ĐẶC TRƯNG (FEATURE EXTRACTOR) - CHỈ TRÍCH XUẤT FEATURE MỚI
 # =================================================================
 
 class FeatureExtractor:
@@ -92,6 +99,7 @@ class FeatureExtractor:
             return 'http://' + url
         return url
 
+    # --- TĨNH: WHOIS, DNS, TLS (Các hàm này giữ nguyên logic) ---
     def _parse_whois_date(self, date_data: Any) -> Optional[datetime]:
         if isinstance(date_data, list): date_data = date_data[0]
         if date_data is None or date_data == 'None': return None
@@ -112,7 +120,6 @@ class FeatureExtractor:
         if not text: return 0.0
         p, lns = Counter(text), float(len(text))
         entropy = -sum(count / lns * math.log2(count / lns) for count in p.values())
-        # Chuẩn hóa về thang [0, 1] cho dễ hiểu
         return entropy / 8.0
 
     def _calculate_dns_volatility(self, domain: str) -> int:
@@ -151,12 +158,16 @@ class FeatureExtractor:
         except TimeoutError: return 0.5
         except Exception: return 0.0
 
-    # --- TĨNH: TRÍCH XUẤT DOMAIN & WHOIS (V3, V4, V11, V22, V23) ---
+
+    # --- TRÍCH XUẤT URL & WHOIS (CẬP NHẬT/GHI ĐÈ + MỚI) ---
     def _get_url_domain_features(self) -> None:
         import whois
+        
+        # MỚI: V11_WHOIS_Extraction_Success
         self.features['V11_WHOIS_Extraction_Success'] = 0
         
         url_no_protocol = self.url.replace("http://", "").replace("https://", "")
+        # GHI ĐÈ: NoOfDegitsInURL
         self.features['NoOfDegitsInURL'] = sum(c.isdigit() for c in url_no_protocol)
         
         domain_info = tldextract.extract(self.url)
@@ -164,9 +175,11 @@ class FeatureExtractor:
         self.current_domain = domain_info.domain
         subdomain = domain_info.subdomain.lower()
         
+        # MỚI: V22_IP_Subdomain_Pattern, V23_Entropy_Subdomain
         self.features['V22_IP_Subdomain_Pattern'] = 1 if re.search(r'\d+\.\d+\.\d+(\.\d+)?', subdomain) else 0
         self.features['V23_Entropy_Subdomain'] = self._calculate_entropy(subdomain)
         
+        # MỚI: V4_DNS_Volatility_Count
         volatility_count = self._calculate_dns_volatility(domain)
         self.features['V4_DNS_Volatility_Count'] = max(0, volatility_count)
 
@@ -185,15 +198,19 @@ class FeatureExtractor:
             # Nếu WHOIS thất bại, đặt tuổi là 10 năm (3650 ngày)
             domain_age_days = 3650
             
+        # MỚI: V3_Domain_Age_Days
         self.features['V3_Domain_Age_Days'] = max(0, domain_age_days)
+        
+        # GHI ĐÈ: IsHTTPS
         self.features['IsHTTPS'] = 1 if self.url.startswith('https://') else 0
 
-        # Giả định Top 1M domain (cho mục đích demo/kiểm tra)
+        # MỚI: Is_Top_1M_Domain
         is_top_1m = 1 if self.current_domain and self.current_domain.lower() in self.top_1m_data else 0
         self.features['Is_Top_1M_Domain'] = is_top_1m
     
-    # --- TĨNH: TRUY VẤN VÀ PHÂN TÍCH NỘI DUNG (V10, V5) ---
+    # --- TRUY VẤN VÀ PHÂN TÍCH NỘI DUNG (CẬP NHẬT/GHI ĐÈ + MỚI) ---
     def _fetch_url_content(self) -> None:
+        # MỚI: V10_HTTP_Extraction_Success
         self.features['V10_HTTP_Extraction_Success'] = 0
         self.http_extraction_successful = False
 
@@ -216,21 +233,25 @@ class FeatureExtractor:
             self.response = None
             self.soup = None
     
-    # --- TĨNH: TRÍCH XUẤT CÁC ĐẶC TRƯNG HTML ---
+    # --- TRÍCH XUẤT CÁC ĐẶC TRƯNG HTML (CẬP NHẬT/GHI ĐÈ + MỚI) ---
     def _get_content_features(self) -> None:
         
-        # ĐẶT GIÁ TRỊ MẶC ĐỊNH CHO CÁC FEATURES (KHI HTTP HOẶC SELENIUM THẤT BẠI)
+        # ĐẶT GIÁ TRỊ MẶC ĐỊNH
         default_features = {
+            # GHI ĐÈ
             'HasDescription': 0, 'HasSocialNet': 0, 'HasPasswordField': 0, 'HasSubmitButton': 0,
             'HasExternalFormSubmit': 0, 'DomainTitleMatchScore': 0.0, 'HasCopyrightInfo': 0,
+            # MỚI
             'V8_Total_IFrames': 0, 'V9_Has_Hidden_IFrame': 0, 'V7_Text_Readability_Score': 0.0,
             'V6_JS_Entropy': 0.0,
             'V1_PHash_Distance': 0.5, # GIÁ TRỊ MẶC ĐỊNH THẤT BẠI SELENIUM
             'V2_Layout_Similarity': 0.5, # GIÁ TRỊ MẶC ĐỊNH THẤT BẠI SELENIUM
         }
+        
+        # Đảm bảo các feature được tính toán lại sẽ ghi đè lên giá trị mặc định (nếu có)
         self.features.update(default_features)
         
-        # Đặc trưng V5 (TLS) có thể chạy độc lập HTTP
+        # MỚI: V5_TLS_Issuer_Reputation
         self.features['V5_TLS_Issuer_Reputation'] = self._calculate_tls_issuer_rep()
 
         if not self.soup:
@@ -239,15 +260,14 @@ class FeatureExtractor:
         def _calculate_readability(text: str) -> float:
             sentences = len(re.split(r'[.!?]+', text))
             words = len(re.findall(r'\w+', text))
-            # Giả định trung bình 1.5 âm tiết/từ cho công thức Flesch-Kincaid đơn giản
             syllables = words * 1.5 
             if sentences == 0 or words == 0: return 50.0
-            # Công thức Flesch-Reading-Ease (FE) 
             score = 206.835 - 1.015 * (words / sentences) - 84.6 * (syllables / words)
             return np.clip(score, 0.0, 100.0)
             
         def _extract_dom_form_features(soup: BeautifulSoup, current_domain: str) -> Dict[str, Any]:
             f: Dict[str, Any] = {}
+            # GHI ĐÈ: HasPasswordField, HasSubmitButton, HasExternalFormSubmit
             f['HasPasswordField'] = 1 if len(soup.find_all('input', type='password')) > 0 else 0
             f['HasSubmitButton'] = 1 if len(soup.find_all('input', type='submit') + soup.find_all('button', type='submit')) > 0 else 0
             
@@ -263,11 +283,13 @@ class FeatureExtractor:
         form_features_static = _extract_dom_form_features(self.soup, self.current_domain)
         self.features.update(form_features_static)
         
+        # GHI ĐÈ: HasDescription, HasSocialNet
         description_tag = self.soup.find('meta', attrs={'name': 'description'})
         self.features['HasDescription'] = 1 if (description_tag and description_tag.get('content')) else 0
         social_links = self.soup.find_all('a', href=lambda href: href and ('facebook.com' in href or 'twitter.com' in href))
         self.features['HasSocialNet'] = 1 if len(social_links) > 0 else 0
         
+        # GHI ĐÈ: DomainTitleMatchScore
         title_text = self.soup.title.string if self.soup.title and self.soup.title.string else ""
         domain_name = self.current_domain.lower() if self.current_domain else ""
         match_score = 0.0
@@ -276,15 +298,18 @@ class FeatureExtractor:
                 match_score = 1.0
         self.features['DomainTitleMatchScore'] = np.clip(match_score, 0.0, 1.0)
 
+        # GHI ĐÈ: HasCopyrightInfo
         copyright_text = self.soup.find(string=lambda text: text and 'copyright' in text.lower())
         self.features['HasCopyrightInfo'] = 1 if copyright_text else 0
 
+        # MỚI: V8_Total_IFrames, V9_Has_Hidden_IFrame
         self.features['V8_Total_IFrames'] = len(self.soup.find_all('iframe'))
         hidden_iframe = self.soup.find('iframe', attrs={'style': lambda style: style and 'display:none' in style.lower()})
         if not hidden_iframe:
             hidden_iframe = self.soup.find('iframe', attrs={'width': '0', 'height': '0'})
         self.features['V9_Has_Hidden_IFrame'] = 1 if hidden_iframe else 0
 
+        # MỚI: V7_Text_Readability_Score, V6_JS_Entropy
         page_text = self.soup.get_text(separator=' ', strip=True)
         self.features['V7_Text_Readability_Score'] = _calculate_readability(page_text)
         
@@ -302,7 +327,6 @@ class FeatureExtractor:
             
         def _calculate_phash_distance(image_data: bytes) -> float:
             try:
-                # Đảm bảo chuyển sang ảnh thang độ xám (L) cho phash tiêu chuẩn
                 image = Image.open(io.BytesIO(image_data)).convert('L') 
                 current_phash = imagehash.phash(image, hash_size=8)
                 distance = current_phash - TARGET_PHASH
@@ -317,9 +341,7 @@ class FeatureExtractor:
                     max_d = max(max_d, find_max_depth(child, current_depth + 1))
                 return max_d
             try:
-                # Tính toán độ sâu tối đa của DOM (Max Depth)
                 max_depth = find_max_depth(dom_tree)
-                # Công thức đơn giản hóa để tính độ phức tạp/tương đồng layout
                 similarity = np.clip(1.0 - (max_depth / 20.0), 0.1, 0.9)
                 return float(f"{similarity:.4f}")
             except Exception:
@@ -359,7 +381,7 @@ class FeatureExtractor:
                 driver.get(self.url) 
                 self.visual_extraction_successful = True
 
-                # TRÍCH XUẤT V1 (PHash Distance) & V2 (Layout Similarity)
+                # MỚI: V1_PHash_Distance & V2_Layout_Similarity
                 screenshot_data = driver.get_screenshot_as_png()
                 self.features['V1_PHash_Distance'] = _calculate_phash_distance(screenshot_data)
 
@@ -370,6 +392,7 @@ class FeatureExtractor:
                 # Cập nhật DOM features dựa trên Selenium (cho trường hợp nội dung load sau JS)
                 def _extract_dom_form_features_dynamic(soup: BeautifulSoup, current_domain: str) -> Dict[str, Any]:
                     f: Dict[str, Any] = {}
+                    # GHI ĐÈ
                     f['HasPasswordField'] = 1 if len(soup.find_all('input', type='password')) > 0 else 0
                     f['HasSubmitButton'] = 1 if len(soup.find_all('input', type='submit') + soup.find_all('button', type='submit')) > 0 else 0
                     
@@ -389,7 +412,6 @@ class FeatureExtractor:
             except Exception as e:
                 # Nếu xảy ra lỗi Selenium (SessionNotCreatedException, Timeout, etc.)
                 print(f"⚠️ Lỗi Selenium khi xử lý {self.url}: {e}")
-                # Giữ nguyên giá trị mặc định 0.5 đã đặt ở _get_content_features
                 pass 
 
             finally:
@@ -400,25 +422,32 @@ class FeatureExtractor:
             print(f"❌ Lỗi Khởi tạo WebDriver: {e_init}")
 
     def get_all_features(self, label: int) -> Optional[Dict[str, Any]]:
-        """Trả về toàn bộ dictionary đặc trưng đã trích xuất được (kể cả thất bại)."""
+        """Trả về dictionary chứa các đặc trưng MỚI và CẦN GHI ĐÈ đã trích xuất được."""
         try:
             self._fetch_url_content()
             self._get_url_domain_features()
             self._get_content_features()
-            # BƯỚC CÓ THỂ THẤT BẠI VÌ SELENIUM
             self._get_visual_and_complex_features()
             
             self.features['label'] = label
             
-            # TRẢ VỀ TOÀN BỘ DICTIONARY (Bao gồm cả 0.5 cho V1, V2 nếu Selenium thất bại)
-            return self.features
+            # CHỈ TRẢ VỀ CÁC CỘT CẦN THIẾT CHO LOG VÀ MERGE
+            # Đảm bảo các cột theo đúng thứ tự FEATURE_ORDER_LOG
+            final_features = {key: self.features.get(key, 
+                                                     0.5 if key in ['V1_PHash_Distance', 'V2_Layout_Similarity'] else 
+                                                     (label if key == 'label' else 0.0)
+                                                    ) for key in FEATURE_ORDER_LOG}
+            
+            return final_features
         except Exception:
-            # Nếu có lỗi quá lớn (ví dụ: WHOIS lỗi không thể phục hồi)
-            self.features['label'] = label
-            return self.features
+            # Nếu có lỗi quá lớn, vẫn trả về dictionary với giá trị mặc định
+            return {key: self.features.get(key, 
+                                             0.5 if key in ['V1_PHash_Distance', 'V2_Layout_Similarity'] else 
+                                             (label if key == 'label' else 0.0)
+                                            ) for key in FEATURE_ORDER_LOG}
 
 # =================================================================
-# III. LOGIC CHẠY ĐA LUỒNG VÀ RESUME
+# III. LOGIC CHẠY ĐA LUỒNG VÀ MERGE
 # =================================================================
 
 def load_data_for_extraction(file_path: str) -> pd.DataFrame:
@@ -433,9 +462,10 @@ def load_data_for_extraction(file_path: str) -> pd.DataFrame:
     
     for enc in ENCODINGS_TO_TRY:
         try:
+            # TẢI TẤT CẢ CÁC CỘT CÓ SẴN
             df_raw = pd.read_csv(file_path, encoding=enc, encoding_errors='ignore')
             success = True
-            print(f"✅ Đọc file CSV thành công với mã hóa: {enc} (Đã bỏ qua lỗi ký tự).")
+            print(f"✅ Đọc file CSV thô thành công với mã hóa: {enc} (Đã bỏ qua lỗi ký tự).")
             break
         except Exception:
             continue
@@ -444,44 +474,39 @@ def load_data_for_extraction(file_path: str) -> pd.DataFrame:
         print(f"❌ Thất bại: Không thể đọc file CSV với bất kỳ mã hóa nào.")
         return pd.DataFrame()
 
-    COLUMNS_TO_KEEP = ['URL', 'label']
-    
-    if not all(col in df_raw.columns for col in COLUMNS_TO_KEEP):
-        missing_cols = [col for col in COLUMNS_TO_KEEP if col not in df_raw.columns]
-        print(f"❌ Lỗi: File CSV nguồn thiếu các cột cần thiết: {missing_cols}")
-        return pd.DataFrame()
-
-    df_base = df_raw[COLUMNS_TO_KEEP].copy()
-    df_base.rename(columns={'URL': 'url'}, inplace=True)
+    df_raw.rename(columns={'URL': 'url'}, inplace=True)
+    df_base = df_raw.copy()
 
     processed_urls = set()
     if os.path.exists(DETAILED_LOG_FILE):
         try:
-            # Đọc file log chi tiết để lấy danh sách URL đã xử lý
+            # Đọc file log chi tiết (chỉ chứa các feature mới)
             df_log = pd.read_csv(DETAILED_LOG_FILE, usecols=['url'], encoding='utf-8', encoding_errors='ignore')
             processed_urls = set(df_log['url'].astype(str).tolist())
-            print(f"✅ Tải log chi tiết thành công: {len(processed_urls)} URL đã được xử lý.")
+            print(f"✅ Tải log chi tiết thành công: {len(processed_urls)} URL đã được xử lý các feature mới.")
             
         except Exception as e:
             print(f"⚠️ Cảnh báo: Lỗi khi đọc file log chi tiết {DETAILED_LOG_FILE}. Đang xóa log để bắt đầu lại. Lỗi: {e}")
-            # Xóa file log chi tiết nếu nó bị lỗi cấu trúc
             try:
                 os.remove(DETAILED_LOG_FILE) 
             except Exception:
                 pass
             processed_urls = set()
     
+    # Lấy các hàng trong df_base mà URL chưa có trong processed_urls
     df_remaining = df_base[~df_base['url'].isin(processed_urls)]
     
     total_count = len(df_base)
     remaining_count = len(df_remaining)
     
     if remaining_count < total_count:
-        print(f"✅ Đã tải: {total_count} URL. Đã xử lý: {total_count - remaining_count} URL. Tiếp tục xử lý {remaining_count} URL còn lại.")
+        print(f"✅ Đã tải: {total_count} URL. Đã xử lý feature mới: {total_count - remaining_count} URL. Tiếp tục xử lý {remaining_count} URL còn lại.")
     else:
-        print(f"✅ Bắt đầu từ đầu: {total_count} URL cần xử lý.")
+        print(f"✅ Bắt đầu trích xuất feature mới: {total_count} URL cần xử lý.")
 
-    return df_remaining
+    # Trả về df_raw gốc (để merge sau) và df_remaining (để xử lý)
+    return df_base, df_remaining
+
 
 def extract_features_worker(row: pd.Series) -> Optional[Tuple[str, Optional[Dict[str, Any]]]]:
     url = row['url']
@@ -489,6 +514,7 @@ def extract_features_worker(row: pd.Series) -> Optional[Tuple[str, Optional[Dict
     
     extractor = FeatureExtractor(url)
     
+    # Chỉ trích xuất các feature MỚI và CẦN GHI ĐÈ
     result_dict = extractor.get_all_features(label)
     
     return (url, result_dict)
@@ -496,50 +522,65 @@ def extract_features_worker(row: pd.Series) -> Optional[Tuple[str, Optional[Dict
 
 def append_to_csv_and_log(results_buffer: List[Tuple[str, Optional[Dict[str, Any]]]], output_file_exists: bool):
     
-    successful_results = []
+    successful_log_dicts = []
     
     for url, features_dict in results_buffer:
         if features_dict:
-            # Điều kiện thành công: V1 và V2 đã được trích xuất (khác giá trị mặc định 0.5)
-            # Kiểm tra hai đặc trưng động quan trọng nhất
-            # Sẽ làm tròn giá trị 0.500x để tránh lỗi dấu phẩy động
-            is_visual_success = (round(features_dict.get('V1_PHash_Distance', 0.5), 2) != 0.5 or 
-                                 round(features_dict.get('V2_Layout_Similarity', 0.5), 2) != 0.5)
-            
-            if is_visual_success:
-                # Nếu trích xuất động thành công, chuyển dictionary thành array theo thứ tự
-                final_array = np.array([features_dict.get(key, 0.0) for key in FEATURE_ORDER])
-                successful_results.append(final_array)
+            # Ghi tất cả các kết quả feature MỚI vào log
+            successful_log_dicts.append(features_dict)
     
-    # 1. Ghi vào file CSV chính (cleaned_extracted_data.csv)
-    if successful_results:
-        df_new = pd.DataFrame(np.vstack(successful_results), columns=FEATURE_ORDER)
-        header = not output_file_exists
-        df_new.to_csv(OUTPUT_CSV_FILE, mode='a', header=header, index=False)
-    
-    # 2. Ghi chi tiết tất cả các đặc trưng đã trích xuất vào file LOG (temp_extraction_log.csv)
-    
-    all_extracted_dicts = [d for u, d in results_buffer if d is not None]
-    
-    if all_extracted_dicts:
-        all_columns = FEATURE_ORDER.copy() 
-        all_columns.insert(0, 'url') # Thêm cột URL vào đầu log
+    # 1. Ghi chi tiết tất cả các đặc trưng MỚI đã trích xuất vào file LOG (temp_new_features_log.csv)
+    if successful_log_dicts:
         
-        # Loại bỏ các cột không trích xuất trong FEATURE_ORDER (dù đã được gán 0.0 hoặc 0)
-        df_log = pd.DataFrame(all_extracted_dicts, columns=all_columns)
+        df_log = pd.DataFrame(successful_log_dicts, columns=FEATURE_ORDER_LOG)
         
         log_file_exists = os.path.exists(DETAILED_LOG_FILE)
         log_header = not log_file_exists
         
         df_log.to_csv(DETAILED_LOG_FILE, mode='a', header=log_header, index=False)
+    
+    # Kiểm tra số lượng thành công (chỉ đếm V1, V2 khác 0.5)
+    successes = sum(1 for d in successful_log_dicts if round(d.get('V1_PHash_Distance', 0.5), 2) != 0.5 or round(d.get('V2_Layout_Similarity', 0.5), 2) != 0.5)
         
-    return len(successful_results)
+    return successes
+
+
+def merge_final_data(df_raw: pd.DataFrame):
+    """Thực hiện merge cuối cùng sau khi tất cả các đặc trưng mới đã được trích xuất và ghi vào log."""
+    if not os.path.exists(DETAILED_LOG_FILE):
+        print("❌ Lỗi: File log feature mới không tồn tại để merge. Chưa có dữ liệu nào được trích xuất.")
+        return
+
+    print("\n--- Bắt đầu giai đoạn 2: Hợp nhất dữ liệu ---")
+    
+    # 1. Đọc lại toàn bộ file log feature mới
+    df_new_features = pd.read_csv(DETAILED_LOG_FILE, encoding='utf-8', encoding_errors='ignore')
+    
+    # 2. Loại bỏ các đặc trưng đã được cập nhật/ghi đè khỏi file thô
+    cols_to_drop = [col for col in OVERWRITE_FEATURES if col != 'label']
+    df_final = df_raw.drop(columns=cols_to_drop, errors='ignore')
+    
+    # 3. Thực hiện merge
+    # Merge df_raw (chứa các cột tĩnh cũ + label) và df_new_features (chứa các cột ghi đè và cột mới)
+    df_final = pd.merge(df_final, df_new_features, on='url', how='left', suffixes=('_old', '_new'))
+    
+    # Loại bỏ các cột *old không cần thiết (chỉ giữ lại cột mới)
+    cols_to_keep = [col for col in df_final.columns if not col.endswith('_old')]
+    df_final = df_final[cols_to_keep]
+
+    # Đảm bảo cột label cuối cùng là cột mới
+    df_final.rename(columns={'label_new': 'label'}, inplace=True)
+    if 'label_old' in df_final.columns:
+         df_final.drop(columns=['label_old'], inplace=True)
+
+    # 4. Ghi ra file cuối cùng
+    df_final.to_csv(OUTPUT_CSV_FILE, index=False)
+    print(f"✅ Hợp nhất thành công. Kết quả cuối cùng lưu tại: {OUTPUT_CSV_FILE}")
 
 
 def check_internet_connectivity():
     print("--- 🩺 Kiểm tra kết nối mạng...")
     try:
-        # Kiểm tra kết nối với Google 
         requests.get("https://www.google.com", timeout=15) 
         print("✅ Kiểm tra kết nối mạng: OK.")
     except requests.exceptions.RequestException:
@@ -552,23 +593,24 @@ def run_multiprocess_extraction():
     
     check_internet_connectivity()
     
-    start_global_time = time.time()
-    
-    df_remaining = load_data_for_extraction(RAW_CSV_FILE)
-    if df_remaining.empty:
-        print("🎉 Tất cả URL đã được xử lý xong hoặc không có dữ liệu để xử lý. Kiểm tra file output.")
+    df_raw, df_remaining = load_data_for_extraction(RAW_CSV_FILE)
+
+    if df_remaining.empty and os.path.exists(DETAILED_LOG_FILE):
+        print("🎉 Tất cả URL đã được xử lý các feature mới. Chuyển sang Merge...")
+        merge_final_data(df_raw)
         return
 
     ALL_ROWS = [row for index, row in df_remaining.iterrows()]
     total_remaining = len(ALL_ROWS)
     
-    print(f"--- Bắt đầu trích xuất {total_remaining} URL còn lại với {MAX_WORKERS} luồng ---")
+    print(f"--- Bắt đầu trích xuất {total_remaining} URL feature mới với {MAX_WORKERS} luồng ---")
     
     results_buffer = []
     processed_count_success = 0
     start_time = time.time()
     
-    initial_processed_count = pd.read_csv(OUTPUT_CSV_FILE).shape[0] if os.path.exists(OUTPUT_CSV_FILE) else 0
+    # Số lượng URL đã hoàn thành trước đó (tính từ log)
+    initial_processed_count = pd.read_csv(DETAILED_LOG_FILE).shape[0] if os.path.exists(DETAILED_LOG_FILE) else 0
 
     output_file_exists = os.path.exists(OUTPUT_CSV_FILE)
 
@@ -586,21 +628,16 @@ def run_multiprocess_extraction():
                 processed_count_success += successes
                 results_buffer = []
 
-                if not output_file_exists and successes > 0:
-                    output_file_exists = True
-                    
                 elapsed_time = time.time() - start_time
-                avg_speed = processed_count_success / elapsed_time if elapsed_time > 0 else 0
+                avg_speed = (i + 1) / elapsed_time if elapsed_time > 0 else 0
                 
-                total_complete = initial_processed_count + processed_count_success
+                total_complete_log = initial_processed_count + (i + 1)
                 
-                print(f"[{i + 1}/{total_remaining}] Đã xử lý (mới): {i + 1} URL. Thành công (mới): {processed_count_success}. Tổng cộng: {total_complete}. Tốc độ: {avg_speed:.2f} URL/giây.")
-    
-    final_elapsed_time = time.time() - start_global_time
-    print(f"\n--- TRÍCH XUẤT HOÀN THÀNH ---")
-    print(f"Thời gian chạy: {final_elapsed_time:.2f} giây.")
-    print(f"Tổng số URL thành công: {total_complete} (Đã bao gồm các lần chạy trước).")
-    print(f"File kết quả: {OUTPUT_CSV_FILE}")
+                print(f"[{i + 1}/{total_remaining}] Đã xử lý (mới): {i + 1} URL. Thành công (V1/V2): {processed_count_success}. Tổng log: {total_complete_log}. Tốc độ: {avg_speed:.2f} URL/giây.")
+
+    print(f"\n--- Giai đoạn 1: Trích xuất Feature mới HOÀN THÀNH ---")
+    # Thực hiện merge cuối cùng sau khi tất cả các luồng đã hoàn thành
+    merge_final_data(df_raw)
 
 # =================================================================
 # IV. KHỐI CHẠY CHÍNH
