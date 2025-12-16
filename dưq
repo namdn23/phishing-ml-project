@@ -10,3 +10,30 @@ playwright install --with-deps
 # Trong Terminal trên Kali Linux
 rm processed_urls_log.txt
 rm cleaned_extracted_data.csv
+
+
+wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | sudo gpg --dearmor -o /etc/apt/keyrings/google-chrome.gpg
+
+echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/google-chrome.gpg] http://dl.google.com/linux/chrome/deb/ stable main" | sudo tee /etc/apt/sources.list.d/google-chrome.list
+
+sudo apt update
+sudo apt install google-chrome-stable -y
+
+https://googlechromelabs.github.io/chrome-for-testing/
+
+cd ~/Downloads
+unzip chromedriver-linux64.zip
+
+
+# 1. Di chuyển file chromedriver vào /usr/local/bin/ 
+# (Đây là thư mục phổ biến để chứa các file thực thi)
+sudo mv chromedriver /usr/local/bin/
+
+# 2. Cấp quyền thực thi
+sudo chmod +x /usr/local/bin/chromedriver
+
+# 3. (Tùy chọn) Kiểm tra xem nó có hoạt động không
+chromedriver --version
+
+
+pip install selenium pillow
