@@ -12,3 +12,10 @@ Some characters could not be decoded, and were replaced with REPLACEMENT CHARACT
 Some characters could not be decoded, and were replaced with REPLACEMENT CHARACTER.
 Some characters could not be decoded, and were replaced with REPLACEMENT CHARACTER.
 [500/235795] Đã xử lý (mới): 500 URL. Thành công (mới): 0. Tổng cộng: 0. Tốc độ: 0.00 URL/giây.
+
+
+# Cấp quyền thực thi cho file Chrome
+sudo chmod +x /usr/local/bin/chrome-linux64/chrome 
+
+# Tạo symbolic link để dễ gọi
+sudo ln -s /usr/local/bin/chrome-linux64/chrome /usr/bin/google-chrome
