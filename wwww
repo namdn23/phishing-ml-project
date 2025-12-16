@@ -1,36 +1,60 @@
---- 🩺 Kiểm tra kết nối mạng...
-✅ Kiểm tra kết nối mạng: OK.
-✅ Đọc file CSV thành công với mã hóa: latin-1 (Đã bỏ qua lỗi ký tự).
-✅ Tải log thành công. Đã bỏ qua các ký tự hỏng nếu có.
-✅ Bắt đầu từ đầu: 235795 URL cần xử lý.
---- Bắt đầu trích xuất 235795 URL còn lại với 8 luồng ---
-Some characters could not be decoded, and were replaced with REPLACEMENT CHARACTER.
-Some characters could not be decoded, and were replaced with REPLACEMENT CHARACTER.
-Some characters could not be decoded, and were replaced with REPLACEMENT CHARACTER.
-Some characters could not be decoded, and were replaced with REPLACEMENT CHARACTER.
-Some characters could not be decoded, and were replaced with REPLACEMENT CHARACTER.
-Some characters could not be decoded, and were replaced with REPLACEMENT CHARACTER.
-Some characters could not be decoded, and were replaced with REPLACEMENT CHARACTER.
-[500/235795] Đã xử lý (mới): 500 URL. Thành công (mới): 0. Tổng cộng: 0. Tốc độ: 0.00 URL/giây.
+import pandas as pd
+import numpy as np
+import os
+
+INPUT_CSV_FILE = 'merged_extracted_data_final_processed.csv'
+# Hoặc tên file cuối cùng sau khi đã lọc: 'final_selected_features.csv'
+
+def check_file_integrity(file_path):
+    if not os.path.exists(file_path):
+        print(f"❌ Lỗi: Không tìm thấy file đầu vào: {file_path}")
+        return
+
+    try:
+        df = pd.read_csv(file_path)
+    except Exception as e:
+        print(f"❌ Lỗi khi đọc file CSV: {e}")
+        return
+
+    print(f"--- Đã đọc thành công {len(df)} dòng dữ liệu ---")
+
+    # 1. KIỂM TRA TỶ LỆ CÁC GIÁ TRỊ CỐ ĐỊNH (0, 1, 0.5)
+    print("\n--- 1. Tỷ lệ các giá trị cố định (0, 1, 0.5) ---")
+    fixed_values = [0, 1, 0.5]
+    for col in df.columns:
+        # Bỏ qua cột URL và các cột liên tục lớn
+        if col in ['url', 'V3_Domain_Age_Days', 'NoOfDegitsInURL']:
+            continue
+        
+        # Đếm tỷ lệ 0.5 (để phát hiện lỗi trích xuất)
+        count_0_5 = (df[col] == 0.5).sum()
+        if count_0_5 > 0:
+            print(f"   ⚠️ {col}: {count_0_5 / len(df) * 100:.2f}% giá trị là 0.5 (Lỗi/Timeout Playwright)")
+        
+        # Đếm tỷ lệ 0 và 1 cho các cột nhị phân
+        if df[col].isin(fixed_values).all():
+            count_0 = (df[col] == 0).sum()
+            print(f"   ✅ {col}: {count_0 / len(df) * 100:.2f}% là 0. Tỷ lệ còn lại là 1.")
 
 
-# Cấp quyền thực thi cho file Chrome
-sudo chmod +x /usr/local/bin/chrome-linux64/chrome 
+    # 2. BÁO CÁO THỐNG KÊ MÔ TẢ (DESCRIPTIVE STATISTICS)
+    # Rất quan trọng để kiểm tra các feature liên tục
+    print("\n--- 2. Báo cáo Thống kê Mô tả cho Feature Liên tục ---")
+    
+    # Chỉ chọn các cột liên tục quan trọng
+    continuous_cols = ['V1_PHash_Distance', 'V2_Layout_Similarity', 'V3_Domain_Age_Days',
+                       'V4_DNS_Volatility_Count', 'V6_JS_Entropy', 'V7_Text_Readability_Score']
 
-# Tạo symbolic link để dễ gọi
-sudo ln -s /usr/local/bin/chrome-linux64/chrome /usr/bin/google-chrome
+    # Thêm các cột nhị phân khác để kiểm tra Max/Min
+    other_checks = [col for col in df.columns if col not in continuous_cols and df[col].dtype != 'object']
+    
+    selected_cols = [col for col in (continuous_cols + other_checks) if col in df.columns]
 
+    # In ra báo cáo thống kê
+    stats = df[selected_cols].describe().T.round(4)
+    
+    # In ra toàn bộ báo cáo để tôi phân tích
+    print("\n" + stats.to_string())
 
-
-# 1. Kiểm tra xem link hiện tại đang trỏ đi đâu (nếu có)
-readlink /usr/bin/google-chrome
-
-# 2. Xóa symbolic link cũ (Chỉ khi bạn biết chắc đó là link cũ)
-sudo rm /usr/bin/google-chrome
-
-# 3. Tạo lại symbolic link (Trỏ đến file thực thi 'chrome' bên trong thư mục)
-# Đảm bảo file thực thi Chrome của bạn nằm ở: /usr/local/bin/chrome-linux64/chrome
-sudo ln -s /usr/local/bin/chrome-linux64/chrome /usr/bin/google-chrome
-
-# 4. Kiểm tra lại việc tạo link đã thành công chưa
-/usr/bin/google-chrome --version
+# --- THAY ĐỔI TÊN FILE CỦA BẠN NẾU CẦN ---
+check_file_integrity(INPUT_CSV_FILE)
