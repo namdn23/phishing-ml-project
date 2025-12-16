@@ -1,5 +1,5 @@
 # =================================================================
-# run_extraction_final.py - LOGIC ĐÃ SỬA LỖI MÃ HÓA, CHỊU LỖI VÀ CHẨN ĐOÁN MẠNG
+# run_extraction_final_selenium.py - BẢN CODE HOÀN CHỈNH SỬ DỤNG SELENIUM
 # =================================================================
 import pandas as pd
 import numpy as np
@@ -10,7 +10,9 @@ import tldextract
 import time
 import re
 from datetime import datetime
-from playwright.sync_api import sync_playwright
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.chrome.service import Service as ChromeService
 import imagehash
 from PIL import Image
 import io
@@ -19,7 +21,6 @@ import math
 from collections import Counter
 from typing import Dict, Any, List, Optional, Tuple
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from functools import partial
 import random
 import socket
 import ssl
@@ -35,7 +36,6 @@ TEMP_LOG_FILE = 'processed_urls_log.txt'
 MAX_WORKERS = 8
 BUFFER_SIZE = 500
 
-# pHash mục tiêu (Thay thế bằng pHash của một trang an toàn nếu cần)
 TARGET_PHASH = imagehash.hex_to_hash('9880e61f1c7e0c4f') 
 
 # THỨ TỰ FEATURE CÓ 24 CỘT (23 features + 1 label)
@@ -67,7 +67,7 @@ USER_AGENTS = [
 
 class FeatureExtractor:
     WHOIS_TIMEOUT: int = 5
-    RENDER_TIMEOUT: int = 15
+    RENDER_TIMEOUT: int = 20 # Tăng timeout cho Selenium
     
     def __init__(self, url: str):
         self.url: str = self._normalize_url(url)
@@ -277,19 +277,22 @@ class FeatureExtractor:
         self.features['V6_JS_Entropy'] = self._calculate_entropy(js_content)
 
 
-    # --- ĐỘNG: TRÍCH XUẤT VISUAL VÀ JAVASCRIPT (V1, V2) ---
+    # --- ĐỘNG: TRÍCH XUẤT VISUAL VÀ JAVASCRIPT (V1, V2) BẰNG SELENIUM ---
     def _get_visual_and_complex_features(self) -> None:
-        """Sử dụng Playwright để render và trích xuất các đặc trưng động."""
+        """Sử dụng Selenium để render và trích xuất các đặc trưng động (V1, V2)."""
+        
         phash_distance = 0.5
         layout_similarity = 0.5
         self.visual_extraction_successful = False
 
         if not self.http_extraction_successful:
+            self.features['V1_PHash_Distance'] = phash_distance
+            self.features['V2_Layout_Similarity'] = layout_similarity
             return
             
         def _calculate_phash_distance(image_data: bytes) -> float:
             try:
-                image = Image.open(io.BytesIO(image_data)).convert('L')
+                image = Image.open(io.BytesIO(image_data)).convert('L') 
                 current_phash = imagehash.phash(image, hash_size=8)
                 distance = current_phash - TARGET_PHASH
                 return float(distance) / 64.0
@@ -309,48 +312,60 @@ class FeatureExtractor:
             except Exception:
                 return 0.5
 
+        driver = None
         try:
-            with sync_playwright() as p:
-                browser = p.chromium.launch(headless=True)
-                page = browser.new_page(user_agent=random.choice(USER_AGENTS))
-                page.set_default_timeout(self.RENDER_TIMEOUT * 1000)
+            # Cấu hình Chrome để chạy ẩn (Headless)
+            chrome_options = Options()
+            chrome_options.add_argument("--headless")
+            chrome_options.add_argument("--no-sandbox")
+            chrome_options.add_argument("--disable-dev-shm-usage")
+            chrome_options.add_argument(f"user-agent={random.choice(USER_AGENTS)}")
+            
+            # Khởi tạo WebDriver (GIẢ ĐỊNH ChromeDriver đã được cài đặt trong PATH)
+            driver = webdriver.Chrome(options=chrome_options)
+            driver.set_page_load_timeout(self.RENDER_TIMEOUT)
+            
+            try:
+                driver.get(self.url) 
+                self.visual_extraction_successful = True
+
+                # 1. TRÍCH XUẤT V1 (PHash Distance)
+                screenshot_data = driver.get_screenshot_as_png()
+                phash_distance = _calculate_phash_distance(screenshot_data)
+
+                # 2. TRÍCH XUẤT V2 (Layout Similarity)
+                rendered_html = driver.page_source
+                rendered_soup = BeautifulSoup(rendered_html, 'html.parser')
+                layout_similarity = _calculate_layout_similarity(rendered_soup)
                 
-                try:
-                    page.goto(self.url, wait_until="domcontentloaded") 
-                    self.visual_extraction_successful = True
-
-                    screenshot_data = page.screenshot(full_page=True, type="jpeg")
-                    phash_distance = _calculate_phash_distance(screenshot_data)
+                # Cập nhật DOM features dựa trên Selenium (Chính xác hơn bản tĩnh)
+                def _extract_dom_form_features_dynamic(soup: BeautifulSoup, current_domain: str) -> Dict[str, Any]:
+                    f: Dict[str, Any] = {}
+                    f['HasPasswordField'] = 1 if len(soup.find_all('input', type='password')) > 0 else 0
+                    f['HasSubmitButton'] = 1 if len(soup.find_all('input', type='submit') + soup.find_all('button', type='submit')) > 0 else 0
                     
-                    rendered_html = page.content()
-                    rendered_soup = BeautifulSoup(rendered_html, 'html.parser')
-                    layout_similarity = _calculate_layout_similarity(rendered_soup)
-                    
-                    def _extract_dom_form_features(soup: BeautifulSoup, current_domain: str) -> Dict[str, Any]:
-                        f: Dict[str, Any] = {}
-                        f['HasPasswordField'] = 1 if len(soup.find_all('input', type='password')) > 0 else 0
-                        f['HasSubmitButton'] = 1 if len(soup.find_all('input', type='submit') + soup.find_all('button', type='submit')) > 0 else 0
-                        
-                        external_form = 0
-                        for form in soup.find_all('form'):
-                            action = form.get('action')
-                            if action and action.startswith('http') and tldextract.extract(action).domain != current_domain:
-                                external_form = 1
-                                break
-                        f['HasExternalFormSubmit'] = external_form
-                        return f
+                    external_form = 0
+                    for form in soup.find_all('form'):
+                        action = form.get('action')
+                        if action and action.startswith('http') and tldextract.extract(action).domain != current_domain:
+                            external_form = 1
+                            break
+                    f['HasExternalFormSubmit'] = external_form
+                    return f
+                
+                dynamic_form_features = _extract_dom_form_features_dynamic(rendered_soup, self.current_domain)
+                self.features.update(dynamic_form_features)
 
-                    rendered_form_features = _extract_dom_form_features(rendered_soup, self.current_domain)
-                    self.features.update(rendered_form_features)
 
-                except Exception:
-                    pass
+            except Exception:
+                pass 
 
-                browser.close()
+            finally:
+                if driver: driver.quit()
         
         except Exception:
-            pass
-            
+            pass # Xử lý lỗi nếu không thể khởi tạo driver (ví dụ: ChromeDriver bị thiếu)
+                
         self.features['V1_PHash_Distance'] = phash_distance
         self.features['V2_Layout_Similarity'] = layout_similarity
 
@@ -375,9 +390,7 @@ class FeatureExtractor:
 # =================================================================
 
 def load_data_for_extraction(file_path: str) -> pd.DataFrame:
-    """Đọc dữ liệu thô và lọc bỏ các URL đã được xử lý (dựa trên log).
-    Đã sửa lỗi mã hóa CSV và tăng cường khả năng đọc log.
-    """
+    """Đọc dữ liệu thô và lọc bỏ các URL đã được xử lý (dựa trên log)."""
     if not os.path.exists(file_path):
         print(f"❌ Lỗi: Không tìm thấy file CSV: {file_path}")
         return pd.DataFrame()
@@ -402,11 +415,6 @@ def load_data_for_extraction(file_path: str) -> pd.DataFrame:
     # -----------------------------------------------
 
     COLUMNS_TO_KEEP = ['URL', 'label']
-    missing_cols = [col for col in COLUMNS_TO_KEEP if col not in df_raw.columns]
-    if missing_cols:
-        print(f"❌ Lỗi: File CSV thiếu các cột bắt buộc: {', '.join(missing_cols)}")
-        return pd.DataFrame()
-        
     df_base = df_raw[COLUMNS_TO_KEEP].copy()
     df_base.rename(columns={'URL': 'url'}, inplace=True)
 
@@ -423,7 +431,6 @@ def load_data_for_extraction(file_path: str) -> pd.DataFrame:
             print(f"✅ Tải log thành công. Đã bỏ qua các ký tự hỏng nếu có.")
             
         except Exception as e:
-            # Nếu vẫn bị lỗi I/O khác (rất hiếm), xóa file log để bắt đầu lại
             print(f"⚠️ Cảnh báo: Lỗi nghiêm trọng khi đọc file log {TEMP_LOG_FILE}. Đang xóa log để bắt đầu lại. Lỗi: {e}")
             os.remove(TEMP_LOG_FILE) 
             processed_urls = set()
@@ -476,12 +483,12 @@ def check_internet_connectivity():
     """Kiểm tra kết nối mạng cơ bản trước khi bắt đầu trích xuất."""
     print("--- 🩺 Kiểm tra kết nối mạng...")
     try:
-        # Sử dụng Google DNS làm mục tiêu kiểm tra ổn định
-        requests.get("https://8.8.8.8", timeout=10) 
+        # Sử dụng mục tiêu HTTPS
+        requests.get("https://www.google.com", timeout=15) 
         print("✅ Kiểm tra kết nối mạng: OK.")
     except requests.exceptions.RequestException:
-        print("❌ KIỂM TRA MẠNG THẤT BẠI: Script không thể kết nối Internet.")
-        print("   Vui lòng kiểm tra cài đặt mạng VMWare (NAT) và Tường lửa Windows Defender/Kaspersky (Dù đã tắt, đôi khi vẫn chặn).")
+        print("❌ KIỂM TRA MẠNG THẤT BẠI: Script không thể kết nối Internet (HTTP/HTTPS).")
+        print("   Vui lòng kiểm tra cài đặt NAT của VMWare.")
         print("   Không thể trích xuất nếu không có mạng.")
         sys.exit(1)
 
