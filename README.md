@@ -25,7 +25,7 @@ import random
 import socket
 import ssl
 
-# Tắt cảnh báo SSL
+# Tắt cảnh báo SSL và tắt ghi file bytecode
 requests.packages.urllib3.disable_warnings()
 sys.dont_write_bytecode = True
 
@@ -33,16 +33,16 @@ sys.dont_write_bytecode = True
 RAW_CSV_FILE = 'PhiUSIIL_Phishing_URL_Dataset.csv'
 OUTPUT_CSV_FILE = 'cleaned_extracted_data.csv'
 
-# FILE LOG MỚI: Ghi tất cả các đặc trưng đã trích xuất (kể cả thất bại Selenium)
+# FILE LOG MỚI: Ghi tất cả 23 đặc trưng đã trích xuất (kể cả thất bại Selenium)
 DETAILED_LOG_FILE = 'temp_extraction_log.csv' 
 
 MAX_WORKERS = 8
 BUFFER_SIZE = 500
 
+# Hash mẫu (ví dụ: Google Search Page)
 TARGET_PHASH = imagehash.hex_to_hash('9880e61f1c7e0c4f') 
 
-# === ❗ KHAI BÁO ĐƯỜNG DẪN SELENIUM (QUAN TRỌNG) ❗ ===
-# Dựa trên cấu hình trên Kali Linux của bạn:
+# === ❗ KHAI BÁO ĐƯỜNG DẪN SELENIUM (QUAN TRỌNG CHO KALI) ❗ ===
 CHROME_DRIVER_PATH = "/usr/local/bin/chromedriver" 
 CHROME_BINARY_PATH = "/usr/local/bin/chrome-linux64/chrome" 
 # =====================================================
@@ -79,7 +79,6 @@ class FeatureExtractor:
     
     def __init__(self, url: str):
         self.url: str = self._normalize_url(url)
-        # Bổ sung cột 'url' vào features để dễ dàng debug
         self.features: Dict[str, Any] = {'url': url} 
         self.response: Optional[requests.Response] = None
         self.soup: Optional[BeautifulSoup] = None
@@ -113,6 +112,7 @@ class FeatureExtractor:
         if not text: return 0.0
         p, lns = Counter(text), float(len(text))
         entropy = -sum(count / lns * math.log2(count / lns) for count in p.values())
+        # Chuẩn hóa về thang [0, 1] cho dễ hiểu
         return entropy / 8.0
 
     def _calculate_dns_volatility(self, domain: str) -> int:
@@ -182,11 +182,13 @@ class FeatureExtractor:
                 domain_age_days = age.days
                 self.features['V11_WHOIS_Extraction_Success'] = 1
         except Exception:
+            # Nếu WHOIS thất bại, đặt tuổi là 10 năm (3650 ngày)
             domain_age_days = 3650
             
         self.features['V3_Domain_Age_Days'] = max(0, domain_age_days)
         self.features['IsHTTPS'] = 1 if self.url.startswith('https://') else 0
 
+        # Giả định Top 1M domain (cho mục đích demo/kiểm tra)
         is_top_1m = 1 if self.current_domain and self.current_domain.lower() in self.top_1m_data else 0
         self.features['Is_Top_1M_Domain'] = is_top_1m
     
@@ -217,16 +219,18 @@ class FeatureExtractor:
     # --- TĨNH: TRÍCH XUẤT CÁC ĐẶC TRƯNG HTML ---
     def _get_content_features(self) -> None:
         
+        # ĐẶT GIÁ TRỊ MẶC ĐỊNH CHO CÁC FEATURES (KHI HTTP HOẶC SELENIUM THẤT BẠI)
         default_features = {
             'HasDescription': 0, 'HasSocialNet': 0, 'HasPasswordField': 0, 'HasSubmitButton': 0,
             'HasExternalFormSubmit': 0, 'DomainTitleMatchScore': 0.0, 'HasCopyrightInfo': 0,
             'V8_Total_IFrames': 0, 'V9_Has_Hidden_IFrame': 0, 'V7_Text_Readability_Score': 0.0,
             'V6_JS_Entropy': 0.0,
-            'V1_PHash_Distance': 0.5, # Giá trị mặc định khi Selenium thất bại
-            'V2_Layout_Similarity': 0.5, # Giá trị mặc định khi Selenium thất bại
+            'V1_PHash_Distance': 0.5, # GIÁ TRỊ MẶC ĐỊNH THẤT BẠI SELENIUM
+            'V2_Layout_Similarity': 0.5, # GIÁ TRỊ MẶC ĐỊNH THẤT BẠI SELENIUM
         }
         self.features.update(default_features)
         
+        # Đặc trưng V5 (TLS) có thể chạy độc lập HTTP
         self.features['V5_TLS_Issuer_Reputation'] = self._calculate_tls_issuer_rep()
 
         if not self.soup:
@@ -235,8 +239,10 @@ class FeatureExtractor:
         def _calculate_readability(text: str) -> float:
             sentences = len(re.split(r'[.!?]+', text))
             words = len(re.findall(r'\w+', text))
-            syllables = words * 1.5
+            # Giả định trung bình 1.5 âm tiết/từ cho công thức Flesch-Kincaid đơn giản
+            syllables = words * 1.5 
             if sentences == 0 or words == 0: return 50.0
+            # Công thức Flesch-Reading-Ease (FE) 
             score = 206.835 - 1.015 * (words / sentences) - 84.6 * (syllables / words)
             return np.clip(score, 0.0, 100.0)
             
@@ -291,12 +297,12 @@ class FeatureExtractor:
     def _get_visual_and_complex_features(self) -> None:
         """Sử dụng Selenium để render và trích xuất các đặc trưng động (V1, V2)."""
         
-        # Nếu HTTP thất bại, giữ nguyên giá trị mặc định 0.5 đã đặt ở _get_content_features
         if not self.http_extraction_successful:
             return
             
         def _calculate_phash_distance(image_data: bytes) -> float:
             try:
+                # Đảm bảo chuyển sang ảnh thang độ xám (L) cho phash tiêu chuẩn
                 image = Image.open(io.BytesIO(image_data)).convert('L') 
                 current_phash = imagehash.phash(image, hash_size=8)
                 distance = current_phash - TARGET_PHASH
@@ -311,7 +317,9 @@ class FeatureExtractor:
                     max_d = max(max_d, find_max_depth(child, current_depth + 1))
                 return max_d
             try:
+                # Tính toán độ sâu tối đa của DOM (Max Depth)
                 max_depth = find_max_depth(dom_tree)
+                # Công thức đơn giản hóa để tính độ phức tạp/tương đồng layout
                 similarity = np.clip(1.0 - (max_depth / 20.0), 0.1, 0.9)
                 return float(f"{similarity:.4f}")
             except Exception:
@@ -322,8 +330,11 @@ class FeatureExtractor:
             # 1. Cấu hình Chrome Options
             chrome_options = Options()
             chrome_options.add_argument("--headless")
-            chrome_options.add_argument("--no-sandbox")
-            chrome_options.add_argument("--disable-dev-shm-usage")
+            # ❗ TÙY CHỌN BẮT BUỘC TRÊN KALI LINUX ❗
+            chrome_options.add_argument("--no-sandbox") 
+            chrome_options.add_argument("--disable-dev-shm-usage") 
+            chrome_options.add_argument("--remote-debugging-port=9222") 
+            # -----------------------------------------------
             chrome_options.add_argument(f"user-agent={random.choice(USER_AGENTS)}")
             
             # 2. Cấu hình Đường dẫn Chrome Binary Tường minh
@@ -356,7 +367,7 @@ class FeatureExtractor:
                 rendered_soup = BeautifulSoup(rendered_html, 'html.parser')
                 self.features['V2_Layout_Similarity'] = _calculate_layout_similarity(rendered_soup)
                 
-                # Cập nhật DOM features dựa trên Selenium (vì nội dung có thể load sau JS)
+                # Cập nhật DOM features dựa trên Selenium (cho trường hợp nội dung load sau JS)
                 def _extract_dom_form_features_dynamic(soup: BeautifulSoup, current_domain: str) -> Dict[str, Any]:
                     f: Dict[str, Any] = {}
                     f['HasPasswordField'] = 1 if len(soup.find_all('input', type='password')) > 0 else 0
@@ -376,6 +387,7 @@ class FeatureExtractor:
 
 
             except Exception as e:
+                # Nếu xảy ra lỗi Selenium (SessionNotCreatedException, Timeout, etc.)
                 print(f"⚠️ Lỗi Selenium khi xử lý {self.url}: {e}")
                 # Giữ nguyên giá trị mặc định 0.5 đã đặt ở _get_content_features
                 pass 
@@ -384,27 +396,29 @@ class FeatureExtractor:
                 if driver: driver.quit()
         
         except Exception as e_init:
+            # Lỗi Khởi tạo WebDriver (Vấn đề chính của bạn)
             print(f"❌ Lỗi Khởi tạo WebDriver: {e_init}")
-            # Giữ nguyên giá trị mặc định 0.5 đã đặt ở _get_content_features
 
     def get_all_features(self, label: int) -> Optional[Dict[str, Any]]:
-        """Trả về toàn bộ dictionary đặc trưng đã trích xuất được."""
+        """Trả về toàn bộ dictionary đặc trưng đã trích xuất được (kể cả thất bại)."""
         try:
             self._fetch_url_content()
             self._get_url_domain_features()
             self._get_content_features()
+            # BƯỚC CÓ THỂ THẤT BẠI VÌ SELENIUM
             self._get_visual_and_complex_features()
             
             self.features['label'] = label
             
+            # TRẢ VỀ TOÀN BỘ DICTIONARY (Bao gồm cả 0.5 cho V1, V2 nếu Selenium thất bại)
             return self.features
         except Exception:
-            # Chỉ trả về một dictionary rỗng hoặc các thông tin cơ bản nếu có lỗi quá lớn
+            # Nếu có lỗi quá lớn (ví dụ: WHOIS lỗi không thể phục hồi)
             self.features['label'] = label
             return self.features
 
 # =================================================================
-# III. LOGIC CHẠY ĐA LUỒNG VÀ RESUME (ĐÃ SỬA LOGIC GHI LOG)
+# III. LOGIC CHẠY ĐA LUỒNG VÀ RESUME
 # =================================================================
 
 def load_data_for_extraction(file_path: str) -> pd.DataFrame:
@@ -450,7 +464,11 @@ def load_data_for_extraction(file_path: str) -> pd.DataFrame:
             
         except Exception as e:
             print(f"⚠️ Cảnh báo: Lỗi khi đọc file log chi tiết {DETAILED_LOG_FILE}. Đang xóa log để bắt đầu lại. Lỗi: {e}")
-            os.remove(DETAILED_LOG_FILE) 
+            # Xóa file log chi tiết nếu nó bị lỗi cấu trúc
+            try:
+                os.remove(DETAILED_LOG_FILE) 
+            except Exception:
+                pass
             processed_urls = set()
     
     df_remaining = df_base[~df_base['url'].isin(processed_urls)]
@@ -471,7 +489,6 @@ def extract_features_worker(row: pd.Series) -> Optional[Tuple[str, Optional[Dict
     
     extractor = FeatureExtractor(url)
     
-    # Hàm get_all_features() giờ trả về toàn bộ dictionary (thành công hoặc thất bại)
     result_dict = extractor.get_all_features(label)
     
     return (url, result_dict)
@@ -484,8 +501,12 @@ def append_to_csv_and_log(results_buffer: List[Tuple[str, Optional[Dict[str, Any
     for url, features_dict in results_buffer:
         if features_dict:
             # Điều kiện thành công: V1 và V2 đã được trích xuất (khác giá trị mặc định 0.5)
-            # Chúng ta sử dụng giá trị làm tròn để tránh sai số floating point
-            if round(features_dict.get('V1_PHash_Distance', 0.5), 1) != 0.5:
+            # Kiểm tra hai đặc trưng động quan trọng nhất
+            # Sẽ làm tròn giá trị 0.500x để tránh lỗi dấu phẩy động
+            is_visual_success = (round(features_dict.get('V1_PHash_Distance', 0.5), 2) != 0.5 or 
+                                 round(features_dict.get('V2_Layout_Similarity', 0.5), 2) != 0.5)
+            
+            if is_visual_success:
                 # Nếu trích xuất động thành công, chuyển dictionary thành array theo thứ tự
                 final_array = np.array([features_dict.get(key, 0.0) for key in FEATURE_ORDER])
                 successful_results.append(final_array)
@@ -501,8 +522,10 @@ def append_to_csv_and_log(results_buffer: List[Tuple[str, Optional[Dict[str, Any
     all_extracted_dicts = [d for u, d in results_buffer if d is not None]
     
     if all_extracted_dicts:
-        # Bổ sung các cột bị thiếu trong FEATURE_ORDER (ví dụ: 'url')
-        all_columns = sorted(list(set(col for d in all_extracted_dicts for col in d)))
+        all_columns = FEATURE_ORDER.copy() 
+        all_columns.insert(0, 'url') # Thêm cột URL vào đầu log
+        
+        # Loại bỏ các cột không trích xuất trong FEATURE_ORDER (dù đã được gán 0.0 hoặc 0)
         df_log = pd.DataFrame(all_extracted_dicts, columns=all_columns)
         
         log_file_exists = os.path.exists(DETAILED_LOG_FILE)
@@ -516,6 +539,7 @@ def append_to_csv_and_log(results_buffer: List[Tuple[str, Optional[Dict[str, Any
 def check_internet_connectivity():
     print("--- 🩺 Kiểm tra kết nối mạng...")
     try:
+        # Kiểm tra kết nối với Google 
         requests.get("https://www.google.com", timeout=15) 
         print("✅ Kiểm tra kết nối mạng: OK.")
     except requests.exceptions.RequestException:
