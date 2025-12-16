@@ -1,0 +1,1 @@
+sudo apt install -y libnss3 libfontconfig libdbus-1-3 libatk-bridge2.0-0 libgtk-3-0 libgbm-dev
