@@ -1,0 +1,14 @@
+--- 🩺 Kiểm tra kết nối mạng...
+✅ Kiểm tra kết nối mạng: OK.
+✅ Đọc file CSV thành công với mã hóa: latin-1 (Đã bỏ qua lỗi ký tự).
+✅ Tải log thành công. Đã bỏ qua các ký tự hỏng nếu có.
+✅ Bắt đầu từ đầu: 235795 URL cần xử lý.
+--- Bắt đầu trích xuất 235795 URL còn lại với 8 luồng ---
+Some characters could not be decoded, and were replaced with REPLACEMENT CHARACTER.
+Some characters could not be decoded, and were replaced with REPLACEMENT CHARACTER.
+Some characters could not be decoded, and were replaced with REPLACEMENT CHARACTER.
+Some characters could not be decoded, and were replaced with REPLACEMENT CHARACTER.
+Some characters could not be decoded, and were replaced with REPLACEMENT CHARACTER.
+Some characters could not be decoded, and were replaced with REPLACEMENT CHARACTER.
+Some characters could not be decoded, and were replaced with REPLACEMENT CHARACTER.
+[500/235795] Đã xử lý (mới): 500 URL. Thành công (mới): 0. Tổng cộng: 0. Tốc độ: 0.00 URL/giây.
