@@ -211,7 +211,8 @@ class FeatureExtractor:
         }
         
         try:
-            self.response = requests.get(self.url, timeout=20, verify=False, allow_redirects=True, headers=headers)
+            # Tăng timeout để Playwright và Requests có đủ thời gian trong mạng NAT
+            self.response = requests.get(self.url, timeout=30, verify=False, allow_redirects=True, headers=headers) 
             self.response.raise_for_status()
             self.soup = BeautifulSoup(self.response.content, 'html.parser')
             self.features['V10_HTTP_Extraction_Success'] = 1
@@ -337,9 +338,13 @@ class FeatureExtractor:
                 
                 try:
                     # GOTO sẽ chờ JavaScript load
-                    page.goto(self.url, wait_until="load")
+                    # Sử dụng wait_until="domcontentloaded" thay cho "load" để tải nhanh hơn
+                    page.goto(self.url, wait_until="domcontentloaded") 
                     self.visual_extraction_successful = True
                     
+                    # Chờ thêm 3s để đảm bảo các yếu tố JS hoàn tất render (optional)
+                    # time.sleep(3) 
+
                     screenshot_data = page.screenshot(full_page=True, type="jpeg")
                     phash_distance = _calculate_phash_distance(screenshot_data)
                     
@@ -347,8 +352,7 @@ class FeatureExtractor:
                     rendered_soup = BeautifulSoup(rendered_html, 'html.parser')
                     layout_similarity = _calculate_layout_similarity(rendered_soup)
                     
-                    # Cập nhật lại Form features sau khi JS render (có thể hiện/ẩn form)
-                    # Helper: Extract Form features (Dynamic DOM)
+                    # Cập nhật lại Form features sau khi JS render
                     def _extract_dom_form_features(soup: BeautifulSoup, current_domain: str) -> Dict[str, Any]:
                         f: Dict[str, Any] = {}
                         f['HasPasswordField'] = 1 if len(soup.find_all('input', type='password')) > 0 else 0
@@ -401,22 +405,30 @@ class FeatureExtractor:
 # =================================================================
 
 def load_data_for_extraction(file_path: str) -> pd.DataFrame:
-    """Đọc dữ liệu thô và lọc bỏ các URL đã được xử lý (dựa trên log)."""
+    """Đọc dữ liệu thô và lọc bỏ các URL đã được xử lý (dựa trên log).
+    Đã sửa lỗi mã hóa (REPLACEMENT CHARACTER).
+    """
     if not os.path.exists(file_path):
         print(f"❌ Lỗi: Không tìm thấy file CSV: {file_path}")
         return pd.DataFrame()
 
-    # --- SỬA LỖI MÃ HÓA (REPLACEMENT CHARACTER) ---
-    # Thêm encoding='latin-1' để xử lý lỗi ký tự
-    try:
-        df_raw = pd.read_csv(file_path, encoding='latin-1')
-    except Exception as e:
-        print(f"❌ Lỗi mã hóa khi đọc file {file_path}. Thử 'utf-8'. Lỗi: {e}")
+    # --- SỬA LỖI MÃ HÓA (Thử các encoding khác nhau) ---
+    ENCODINGS_TO_TRY = ['latin-1', 'utf-8', 'iso-8859-1', 'cp1252']
+    df_raw = pd.DataFrame()
+    success = False
+    
+    for enc in ENCODINGS_TO_TRY:
         try:
-            df_raw = pd.read_csv(file_path, encoding='utf-8')
-        except Exception as e_utf8:
-            print(f"❌ Thử 'utf-8' cũng thất bại. Vui lòng kiểm tra mã hóa file nguồn.")
-            return pd.DataFrame()
+            df_raw = pd.read_csv(file_path, encoding=enc)
+            success = True
+            print(f"✅ Đọc file CSV thành công với mã hóa: {enc}")
+            break
+        except Exception:
+            continue
+    
+    if not success:
+        print(f"❌ Thất bại: Không thể đọc file CSV với bất kỳ mã hóa nào. Vui lòng kiểm tra mã hóa file nguồn.")
+        return pd.DataFrame()
     # -----------------------------------------------
 
     # Giữ lại cột URL và LABEL
@@ -442,7 +454,8 @@ def load_data_for_extraction(file_path: str) -> pd.DataFrame:
                     if url_to_add:
                         processed_urls.add(url_to_add)
         except Exception as e:
-            print(f"⚠️ Cảnh báo: Lỗi khi đọc file log {TEMP_LOG_FILE}. Log sẽ được bỏ qua. Lỗi: {e}")
+            print(f"⚠️ Cảnh báo: Lỗi khi đọc file log {TEMP_LOG_FILE}. Đang xóa log để bắt đầu lại. Lỗi: {e}")
+            os.remove(TEMP_LOG_FILE) # Xóa log bị hỏng
             processed_urls = set()
     
     # Lọc bỏ các URL đã xử lý
@@ -483,7 +496,9 @@ def append_to_csv_and_log(results_buffer: List[Tuple[str, Optional[np.ndarray]]]
         df_new.to_csv(OUTPUT_CSV_FILE, mode='a', header=header, index=False)
         
     processed_urls = [res[0] for res in results_buffer]
-    with open(TEMP_LOG_FILE, 'a') as f:
+    
+    # Ghi toàn bộ URL trong buffer (thành công và thất bại) vào log
+    with open(TEMP_LOG_FILE, 'a', encoding='utf-8') as f: 
         f.write('\n'.join(processed_urls) + '\n')
             
     return len(successful_results)
@@ -494,7 +509,7 @@ def run_multiprocess_extraction():
     
     df_remaining = load_data_for_extraction(RAW_CSV_FILE)
     if df_remaining.empty:
-        print("🎉 Tất cả URL đã được xử lý xong. Kiểm tra file output.")
+        print("🎉 Tất cả URL đã được xử lý xong hoặc không có dữ liệu để xử lý. Kiểm tra file output.")
         return
 
     ALL_ROWS = [row for index, row in df_remaining.iterrows()]
@@ -502,9 +517,8 @@ def run_multiprocess_extraction():
     
     print(f"--- Bắt đầu trích xuất {total_remaining} URL còn lại với {MAX_WORKERS} luồng ---")
     
-
     results_buffer = []
-    processed_count = 0
+    processed_count_success = 0
     start_time = time.time()
     
     # Đếm số lượng mẫu đã hoàn thành (từ file output)
@@ -525,7 +539,7 @@ def run_multiprocess_extraction():
             if len(results_buffer) >= BUFFER_SIZE or (i + 1) == total_remaining:
                 
                 successes = append_to_csv_and_log(results_buffer, output_file_exists)
-                processed_count += successes
+                processed_count_success += successes
                 results_buffer = []
 
                 if not output_file_exists and successes > 0:
@@ -533,11 +547,11 @@ def run_multiprocess_extraction():
                     
                 # Cập nhật tiến độ
                 elapsed_time = time.time() - start_time
-                avg_speed = processed_count / elapsed_time if elapsed_time > 0 else 0
+                avg_speed = processed_count_success / elapsed_time if elapsed_time > 0 else 0
                 
-                total_complete = initial_processed_count + processed_count
+                total_complete = initial_processed_count + processed_count_success
                 
-                print(f"[{i + 1}/{total_remaining}] Đã xử lý (mới): {i + 1} URL. Thành công (mới): {processed_count}. Tổng cộng: {total_complete}. Tốc độ: {avg_speed:.2f} URL/giây.")
+                print(f"[{i + 1}/{total_remaining}] Đã xử lý (mới): {i + 1} URL. Thành công (mới): {processed_count_success}. Tổng cộng: {total_complete}. Tốc độ: {avg_speed:.2f} URL/giây.")
     
     # 4. Kết thúc
     final_elapsed_time = time.time() - start_global_time
