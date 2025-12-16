@@ -1,5 +1,5 @@
 # =================================================================
-# run_extraction_final.py - TRÍCH XUẤT ĐA LUỒNG STATIC + DYNAMIC (CÓ RESUME)
+# run_extraction_final.py - LOGIC ĐÃ SỬA LỖI MÃ HÓA, CHỊU LỖI VÀ CHẨN ĐOÁN MẠNG
 # =================================================================
 import pandas as pd
 import numpy as np
@@ -35,8 +35,8 @@ TEMP_LOG_FILE = 'processed_urls_log.txt'
 MAX_WORKERS = 8
 BUFFER_SIZE = 500
 
-# pHash mục tiêu (Dựa trên trang an toàn phổ biến, ví dụ: Google)
-TARGET_PHASH = imagehash.hex_to_hash('9880e61f1c7e0c4f')
+# pHash mục tiêu (Thay thế bằng pHash của một trang an toàn nếu cần)
+TARGET_PHASH = imagehash.hex_to_hash('9880e61f1c7e0c4f') 
 
 # THỨ TỰ FEATURE CÓ 24 CỘT (23 features + 1 label)
 FEATURE_ORDER: List[str] = [
@@ -77,8 +77,7 @@ class FeatureExtractor:
         self.current_domain: Optional[str] = None
         self.http_extraction_successful: bool = False
         self.visual_extraction_successful: bool = False
-        # Dữ liệu Top 1M (Chỉ là mẫu, cần thay bằng file thực tế nếu cần)
-        self.top_1m_data: Dict[str, bool] = {'google': True, 'facebook': True, 'microsoft': True}
+        self.top_1m_data: Dict[str, bool] = {'google': True, 'facebook': True, 'microsoft': True} 
 
     def _normalize_url(self, url: str) -> str:
         if not url.startswith('http'):
@@ -102,26 +101,21 @@ class FeatureExtractor:
         return None
     
     def _calculate_entropy(self, text: str) -> float:
-        """Tính Entropy Shannon, chuẩn hóa về thang [0, 1]."""
         if not text: return 0.0
         p, lns = Counter(text), float(len(text))
         entropy = -sum(count / lns * math.log2(count / lns) for count in p.values())
         return entropy / 8.0
 
     def _calculate_dns_volatility(self, domain: str) -> int:
-        """[LOGIC THỰC TẾ CHO V4_DNS_Volatility_Count] - Mô phỏng tra cứu DNS."""
         try:
-            # Tra cứu IP (A record)
             ip_list = socket.gethostbyname_ex(domain)[2]
-            # Giả định biến động = số lượng IP khác nhau - 1
             return len(set(ip_list)) - 1
         except socket.gaierror:
-            return -1 # Domain không tồn tại
+            return -1 
         except Exception:
             return 0
             
     def _calculate_tls_issuer_rep(self) -> float:
-        """[LOGIC THỰC TẾ CHO V5_TLS_Issuer_Reputation] - Tra cứu SSL/TLS Certificate."""
         if not self.url.startswith('https://'):
             return 0.0
 
@@ -138,10 +132,8 @@ class FeatureExtractor:
             
             TRUSTED_ISSUERS = ['google', 'amazon', 'digicert', 'cloudflare', 'globalsign']
             
-            if 'lets encrypt' in issuer:
-                 return 0.7 # Cho phép nhưng điểm không cao
-            if any(name in issuer for name in TRUSTED_ISSUERS):
-                return 0.95
+            if 'lets encrypt' in issuer: return 0.7 
+            if any(name in issuer for name in TRUSTED_ISSUERS): return 0.95
             
             return 0.2
 
@@ -163,18 +155,12 @@ class FeatureExtractor:
         self.current_domain = domain_info.domain
         subdomain = domain_info.subdomain.lower()
         
-        # V22_IP_Subdomain_Pattern
-        ip_pattern_match = re.search(r'\d+\.\d+\.\d+(\.\d+)?', subdomain)
-        self.features['V22_IP_Subdomain_Pattern'] = 1 if ip_pattern_match else 0
-        
-        # V23_Entropy_Subdomain
+        self.features['V22_IP_Subdomain_Pattern'] = 1 if re.search(r'\d+\.\d+\.\d+(\.\d+)?', subdomain) else 0
         self.features['V23_Entropy_Subdomain'] = self._calculate_entropy(subdomain)
         
-        # V4_DNS_Volatility_Count
         volatility_count = self._calculate_dns_volatility(domain)
         self.features['V4_DNS_Volatility_Count'] = max(0, volatility_count)
 
-        # V3_Domain_Age_Days & V11_WHOIS_Extraction_Success
         domain_age_days = 0
         try:
             whois_info = whois.whois(domain, timeout=self.WHOIS_TIMEOUT)
@@ -187,7 +173,7 @@ class FeatureExtractor:
                 domain_age_days = age.days
                 self.features['V11_WHOIS_Extraction_Success'] = 1
         except Exception:
-            domain_age_days = 3650 # Giá trị mặc định an toàn nếu WHOIS thất bại
+            domain_age_days = 3650
             
         self.features['V3_Domain_Age_Days'] = max(0, domain_age_days)
         self.features['IsHTTPS'] = 1 if self.url.startswith('https://') else 0
@@ -197,7 +183,6 @@ class FeatureExtractor:
     
     # --- TĨNH: TRUY VẤN VÀ PHÂN TÍCH NỘI DUNG (V10, V5) ---
     def _fetch_url_content(self) -> None:
-        """Tải nội dung URL (Requests/Static)"""
         self.features['V10_HTTP_Extraction_Success'] = 0
         self.http_extraction_successful = False
 
@@ -211,8 +196,8 @@ class FeatureExtractor:
         }
         
         try:
-            # Tăng timeout để Playwright và Requests có đủ thời gian trong mạng NAT
-            self.response = requests.get(self.url, timeout=30, verify=False, allow_redirects=True, headers=headers) 
+            # Tăng timeout để xử lý mạng chậm
+            self.response = requests.get(self.url, timeout=40, verify=False, allow_redirects=True, headers=headers) 
             self.response.raise_for_status()
             self.soup = BeautifulSoup(self.response.content, 'html.parser')
             self.features['V10_HTTP_Extraction_Success'] = 1
@@ -221,7 +206,7 @@ class FeatureExtractor:
             self.response = None
             self.soup = None
     
-    # --- TĨNH: TRÍCH XUẤT CÁC ĐẶC TRƯNG HTML (HasDescription, HasSocialNet, V6, V7, V8, V9, V5) ---
+    # --- TĨNH: TRÍCH XUẤT CÁC ĐẶC TRƯNG HTML ---
     def _get_content_features(self) -> None:
         
         default_features = {
@@ -232,13 +217,11 @@ class FeatureExtractor:
         }
         self.features.update(default_features)
         
-        # V5_TLS_Issuer_Reputation (Static, cần HTTPS)
         self.features['V5_TLS_Issuer_Reputation'] = self._calculate_tls_issuer_rep()
 
         if not self.soup:
             return
             
-        # Helper: Readability Score
         def _calculate_readability(text: str) -> float:
             sentences = len(re.split(r'[.!?]+', text))
             words = len(re.findall(r'\w+', text))
@@ -247,7 +230,6 @@ class FeatureExtractor:
             score = 206.835 - 1.015 * (words / sentences) - 84.6 * (syllables / words)
             return np.clip(score, 0.0, 100.0)
             
-        # Helper: Extract Form features (Static DOM)
         def _extract_dom_form_features(soup: BeautifulSoup, current_domain: str) -> Dict[str, Any]:
             f: Dict[str, Any] = {}
             f['HasPasswordField'] = 1 if len(soup.find_all('input', type='password')) > 0 else 0
@@ -262,7 +244,6 @@ class FeatureExtractor:
             f['HasExternalFormSubmit'] = external_form
             return f
 
-        # Cập nhật Form features dựa trên DOM tĩnh (có thể được ghi đè bởi Dynamic sau)
         form_features_static = _extract_dom_form_features(self.soup, self.current_domain)
         self.features.update(form_features_static)
         
@@ -298,7 +279,7 @@ class FeatureExtractor:
 
     # --- ĐỘNG: TRÍCH XUẤT VISUAL VÀ JAVASCRIPT (V1, V2) ---
     def _get_visual_and_complex_features(self) -> None:
-        """Sử dụng Playwright để render và trích xuất các đặc trưng động (V1, V2)."""
+        """Sử dụng Playwright để render và trích xuất các đặc trưng động."""
         phash_distance = 0.5
         layout_similarity = 0.5
         self.visual_extraction_successful = False
@@ -306,7 +287,6 @@ class FeatureExtractor:
         if not self.http_extraction_successful:
             return
             
-        # Helper: Calculate pHash Distance
         def _calculate_phash_distance(image_data: bytes) -> float:
             try:
                 image = Image.open(io.BytesIO(image_data)).convert('L')
@@ -316,7 +296,6 @@ class FeatureExtractor:
             except Exception:
                 return 0.5
 
-        # Helper: Calculate Layout Similarity (Dựa trên độ sâu DOM tối đa)
         def _calculate_layout_similarity(dom_tree: BeautifulSoup) -> float:
             def find_max_depth(element: BeautifulSoup, current_depth: int = 0) -> int:
                 max_d = current_depth
@@ -337,13 +316,8 @@ class FeatureExtractor:
                 page.set_default_timeout(self.RENDER_TIMEOUT * 1000)
                 
                 try:
-                    # GOTO sẽ chờ JavaScript load
-                    # Sử dụng wait_until="domcontentloaded" thay cho "load" để tải nhanh hơn
                     page.goto(self.url, wait_until="domcontentloaded") 
                     self.visual_extraction_successful = True
-                    
-                    # Chờ thêm 3s để đảm bảo các yếu tố JS hoàn tất render (optional)
-                    # time.sleep(3) 
 
                     screenshot_data = page.screenshot(full_page=True, type="jpeg")
                     phash_distance = _calculate_phash_distance(screenshot_data)
@@ -352,7 +326,6 @@ class FeatureExtractor:
                     rendered_soup = BeautifulSoup(rendered_html, 'html.parser')
                     layout_similarity = _calculate_layout_similarity(rendered_soup)
                     
-                    # Cập nhật lại Form features sau khi JS render
                     def _extract_dom_form_features(soup: BeautifulSoup, current_domain: str) -> Dict[str, Any]:
                         f: Dict[str, Any] = {}
                         f['HasPasswordField'] = 1 if len(soup.find_all('input', type='password')) > 0 else 0
@@ -389,15 +362,12 @@ class FeatureExtractor:
             self._get_content_features()
             self._get_visual_and_complex_features()
             
-            # Gán nhãn cuối cùng
             self.features['label'] = label
             
-            # Đảm bảo tất cả 24 cột (23 features + label) đều có giá trị
             final_array = np.array([self.features.get(key, 0.0) for key in FEATURE_ORDER])
             
             return final_array
-        except Exception as e:
-            # print(f"Lỗi nghiêm trọng khi trích xuất {self.url}: {e}")
+        except Exception:
             return None
 
 # =================================================================
@@ -406,13 +376,13 @@ class FeatureExtractor:
 
 def load_data_for_extraction(file_path: str) -> pd.DataFrame:
     """Đọc dữ liệu thô và lọc bỏ các URL đã được xử lý (dựa trên log).
-    Đã sửa lỗi mã hóa (REPLACEMENT CHARACTER).
+    Đã sửa lỗi mã hóa CSV và tăng cường khả năng đọc log.
     """
     if not os.path.exists(file_path):
         print(f"❌ Lỗi: Không tìm thấy file CSV: {file_path}")
         return pd.DataFrame()
 
-    # --- SỬA LỖI MÃ HÓA (Thử các encoding khác nhau) ---
+    # --- SỬA LỖI MÃ HÓA CSV (Thử các encoding khác nhau) ---
     ENCODINGS_TO_TRY = ['latin-1', 'utf-8', 'iso-8859-1', 'cp1252']
     df_raw = pd.DataFrame()
     success = False
@@ -431,10 +401,7 @@ def load_data_for_extraction(file_path: str) -> pd.DataFrame:
         return pd.DataFrame()
     # -----------------------------------------------
 
-    # Giữ lại cột URL và LABEL
     COLUMNS_TO_KEEP = ['URL', 'label']
-
-    # Kiểm tra cột có tồn tại không
     missing_cols = [col for col in COLUMNS_TO_KEEP if col not in df_raw.columns]
     if missing_cols:
         print(f"❌ Lỗi: File CSV thiếu các cột bắt buộc: {', '.join(missing_cols)}")
@@ -443,22 +410,24 @@ def load_data_for_extraction(file_path: str) -> pd.DataFrame:
     df_base = df_raw[COLUMNS_TO_KEEP].copy()
     df_base.rename(columns={'URL': 'url'}, inplace=True)
 
-    # --- LOGIC TIẾP TỤC (RESUME LOGIC) ---
+    # --- LOGIC TIẾP TỤC (RESUME LOGIC) VỚI KHẢ NĂNG CHỊU LỖI CAO ---
     processed_urls = set()
     if os.path.exists(TEMP_LOG_FILE):
         try:
-            # Đọc log với mã hóa 'utf-8' an toàn
-            with open(TEMP_LOG_FILE, 'r', encoding='utf-8') as f: 
+            # SỬ DỤNG 'errors='ignore'' ĐỂ TỰ ĐỘNG BỎ QUA KÝ TỰ HỎNG TRONG LOG CŨ
+            with open(TEMP_LOG_FILE, 'r', encoding='utf-8', errors='ignore') as f: 
                 for line in f:
                     url_to_add = line.strip()
                     if url_to_add:
                         processed_urls.add(url_to_add)
+            print(f"✅ Tải log thành công. Đã bỏ qua các ký tự hỏng nếu có.")
+            
         except Exception as e:
-            print(f"⚠️ Cảnh báo: Lỗi khi đọc file log {TEMP_LOG_FILE}. Đang xóa log để bắt đầu lại. Lỗi: {e}")
-            os.remove(TEMP_LOG_FILE) # Xóa log bị hỏng
+            # Nếu vẫn bị lỗi I/O khác (rất hiếm), xóa file log để bắt đầu lại
+            print(f"⚠️ Cảnh báo: Lỗi nghiêm trọng khi đọc file log {TEMP_LOG_FILE}. Đang xóa log để bắt đầu lại. Lỗi: {e}")
+            os.remove(TEMP_LOG_FILE) 
             processed_urls = set()
     
-    # Lọc bỏ các URL đã xử lý
     df_remaining = df_base[~df_base['url'].isin(processed_urls)]
     
     total_count = len(df_base)
@@ -497,13 +466,30 @@ def append_to_csv_and_log(results_buffer: List[Tuple[str, Optional[np.ndarray]]]
         
     processed_urls = [res[0] for res in results_buffer]
     
-    # Ghi toàn bộ URL trong buffer (thành công và thất bại) vào log
+    # Ghi toàn bộ URL trong buffer (thành công và thất bại) vào log bằng utf-8
     with open(TEMP_LOG_FILE, 'a', encoding='utf-8') as f: 
         f.write('\n'.join(processed_urls) + '\n')
             
     return len(successful_results)
 
+def check_internet_connectivity():
+    """Kiểm tra kết nối mạng cơ bản trước khi bắt đầu trích xuất."""
+    print("--- 🩺 Kiểm tra kết nối mạng...")
+    try:
+        # Sử dụng Google DNS làm mục tiêu kiểm tra ổn định
+        requests.get("https://8.8.8.8", timeout=10) 
+        print("✅ Kiểm tra kết nối mạng: OK.")
+    except requests.exceptions.RequestException:
+        print("❌ KIỂM TRA MẠNG THẤT BẠI: Script không thể kết nối Internet.")
+        print("   Vui lòng kiểm tra cài đặt mạng VMWare (NAT) và Tường lửa Windows Defender/Kaspersky (Dù đã tắt, đôi khi vẫn chặn).")
+        print("   Không thể trích xuất nếu không có mạng.")
+        sys.exit(1)
+
+
 def run_multiprocess_extraction():
+    
+    # BƯỚC CHẨN ĐOÁN MẠNG
+    check_internet_connectivity()
     
     start_global_time = time.time()
     
@@ -521,7 +507,6 @@ def run_multiprocess_extraction():
     processed_count_success = 0
     start_time = time.time()
     
-    # Đếm số lượng mẫu đã hoàn thành (từ file output)
     initial_processed_count = pd.read_csv(OUTPUT_CSV_FILE).shape[0] if os.path.exists(OUTPUT_CSV_FILE) else 0
 
     output_file_exists = os.path.exists(OUTPUT_CSV_FILE)
@@ -535,7 +520,6 @@ def run_multiprocess_extraction():
             url, result = future.result()
             results_buffer.append((url, result))
             
-            # 3. Logic Ghi Đệm (Buffering) và Logging
             if len(results_buffer) >= BUFFER_SIZE or (i + 1) == total_remaining:
                 
                 successes = append_to_csv_and_log(results_buffer, output_file_exists)
@@ -545,7 +529,6 @@ def run_multiprocess_extraction():
                 if not output_file_exists and successes > 0:
                     output_file_exists = True
                     
-                # Cập nhật tiến độ
                 elapsed_time = time.time() - start_time
                 avg_speed = processed_count_success / elapsed_time if elapsed_time > 0 else 0
                 
