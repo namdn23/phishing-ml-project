@@ -1,0 +1,103 @@
+import pandas as pd
+import os
+
+# --- 1. CẤU HÌNH FILE ---
+# File CSV đầu vào đã được merge (từ đoạn code trước của bạn)
+INPUT_CSV_FILE = 'merged_extracted_data_final_processed.csv'
+# File CSV đầu ra chứa CHỈ các feature bạn cần
+OUTPUT_CLEAN_FILE = 'final_selected_features.csv'
+
+# --- 2. DANH SÁCH CÁC FEATURE CẦN GIỮ LẠI ---
+
+# Các đặc trưng CẦN GHI ĐÈ/CẬP NHẬT (từ file thô)
+OVERWRITE_FEATURES = [
+    'NoOfDegitsInURL', 'HasDescription', 'HasSocialNet', 'HasPasswordField', 'HasSubmitButton',
+    'HasExternalFormSubmit', 'DomainTitleMatchScore', 'IsHTTPS', 'HasCopyrightInfo', 'label'
+]
+
+# Các đặc trưng MỚI được trích xuất (NEW_FEATURES)
+NEW_FEATURES = [
+    'V10_HTTP_Extraction_Success', 'V11_WHOIS_Extraction_Success', 'V1_PHash_Distance',
+    'V2_Layout_Similarity', 'V6_JS_Entropy', 'V7_Text_Readability_Score', 'V8_Total_IFrames',
+    'V9_Has_Hidden_IFrame', 'V5_TLS_Issuer_Reputation', 'V3_Domain_Age_Days',
+    'V4_DNS_Volatility_Count', 'Is_Top_1M_Domain', 'V22_IP_Subdomain_Pattern',
+    'V23_Entropy_Subdomain'
+]
+
+# Các cột bắt buộc cần giữ (URL và các cột Báo Hiệu Lỗi)
+MANDATORY_COLUMNS = ['url']
+
+# Các cột Báo Hiệu Lỗi (Indicator Variables) được tạo ra ở bước merge cuối
+# Bạn cần giữ lại các cột này nếu muốn mô hình biết dữ liệu nào bị thiếu
+# Ví dụ: Is_V3_Domain_Age_Days_Missing_V11 (được tạo khi V11=0)
+INDICATOR_COLUMNS = []
+# Tạo tên các cột báo hiệu lỗi từ các danh sách feature đã định nghĩa
+DYNAMIC_CONTENT_FEATURES = [
+    'V1_PHash_Distance', 'V2_Layout_Similarity', 'V6_JS_Entropy', 'V7_Text_Readability_Score',
+    'V8_Total_IFrames', 'V9_Has_Hidden_IFrame', 'HasDescription', 'HasSocialNet',
+    'HasPasswordField', 'HasSubmitButton', 'HasExternalFormSubmit', 'DomainTitleMatchScore',
+    'HasCopyrightInfo', 'V5_TLS_Issuer_Reputation'
+]
+WHOIS_FEATURES = ['V3_Domain_Age_Days']
+
+INDICATOR_COLUMNS.extend([f'Is_{col}_Missing_V10' for col in DYNAMIC_CONTENT_FEATURES])
+INDICATOR_COLUMNS.extend([f'Is_{col}_Missing_V11' for col in WHOIS_FEATURES])
+
+
+# TỔNG HỢP DANH SÁCH CÁC CỘT CUỐI CÙNG CẦN GIỮ
+COLUMNS_TO_KEEP = (
+    MANDATORY_COLUMNS +
+    OVERWRITE_FEATURES +
+    NEW_FEATURES +
+    INDICATOR_COLUMNS
+)
+
+# Loại bỏ các cột trùng lặp (ví dụ: 'label' nằm trong cả OVERWRITE_FEATURES và các cột khác)
+COLUMNS_TO_KEEP = list(dict.fromkeys(COLUMNS_TO_KEEP))
+
+# --- 3. LOGIC XỬ LÝ DỮ LIỆU ---
+
+def filter_and_save_features():
+    """Đọc file đã merge, lọc các cột cần thiết và lưu lại."""
+    if not os.path.exists(INPUT_CSV_FILE):
+        print(f"❌ Lỗi: Không tìm thấy file đầu vào: {INPUT_CSV_FILE}. Hãy chắc chắn bạn đã chạy merge trước đó.")
+        return
+
+    print(f"--- Đang đọc file: {INPUT_CSV_FILE} ---")
+    try:
+        df = pd.read_csv(INPUT_CSV_FILE)
+    except Exception as e:
+        print(f"❌ Lỗi khi đọc file CSV: {e}")
+        return
+
+    total_cols_before = len(df.columns)
+
+    # Lấy danh sách các cột có trong DataFrame và nằm trong danh sách cần giữ
+    # Việc này giúp tránh lỗi nếu tên cột trong file không khớp hoàn toàn
+    final_cols = [col for col in COLUMNS_TO_KEEP if col in df.columns]
+
+    # Kiểm tra các cột bị thiếu (chỉ để thông báo)
+    missing_cols = [col for col in COLUMNS_TO_KEEP if col not in df.columns]
+    if missing_cols:
+        print(f"⚠️ Cảnh báo: {len(missing_cols)} cột cần thiết không tìm thấy trong file (ví dụ: {missing_cols[0]}).")
+
+    # Lọc DataFrame chỉ giữ lại các cột cần thiết
+    df_filtered = df[final_cols]
+
+    total_cols_after = len(df_filtered.columns)
+
+    # Lưu file mới
+    df_filtered.to_csv(OUTPUT_CLEAN_FILE, index=False)
+
+    print("\n================ KẾT QUẢ DỌN DẸP ================")
+    print(f"✅ Đã lưu file sạch tại: {OUTPUT_CLEAN_FILE}")
+    print(f"Tổng số cột ban đầu: {total_cols_before}")
+    print(f"Tổng số cột được giữ lại: {total_cols_after}")
+    print(f"Đã loại bỏ: {total_cols_before - total_cols_after} cột không cần thiết.")
+    print("-------------------------------------------------")
+    print("5 cột đầu tiên trong file mới:")
+    print(df_filtered.head())
+
+
+if __name__ == "__main__":
+    filter_and_save_features()
