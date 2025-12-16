@@ -1,2 +1,6 @@
 sudo chmod +x /usr/local/bin/chrome-linux64/chrome
 sudo chmod +x /usr/local/bin/chromedriver
+
+
+/usr/local/bin/chrome-linux64/chrome --version
+/usr/local/bin/chromedriver --version
