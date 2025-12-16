@@ -1,5 +1,5 @@
 # =================================================================
-# run_extraction_final_selenium.py - BẢN CODE ĐÃ SỬA LỖI ENCODING VÀ TRÍCH XUẤT 23 FEATURES + LABEL
+# run_extraction_final_selenium.py - BẢN CODE ĐÃ SỬA LỖI SELENIUM & ENCODING
 # =================================================================
 import pandas as pd
 import numpy as np
@@ -12,7 +12,7 @@ import re
 from datetime import datetime
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.chrome.service import Service as ChromeService
+from selenium.webdriver.chrome.service import Service as ChromeService # Cần thiết
 import imagehash
 from PIL import Image
 import io
@@ -38,7 +38,13 @@ BUFFER_SIZE = 500
 
 TARGET_PHASH = imagehash.hex_to_hash('9880e61f1c7e0c4f') 
 
-# THỨ TỰ FEATURE CÓ 24 CỘT (23 features + 1 label)
+# === ❗ KHAI BÁO ĐƯỜNG DẪN SELENIUM (QUAN TRỌNG) ❗ ===
+# Dựa trên ảnh của bạn:
+CHROME_DRIVER_PATH = "/usr/local/bin/chromedriver" 
+# File Chrome thực thi nằm trong thư mục chrome-linux64/
+CHROME_BINARY_PATH = "/usr/local/bin/chrome-linux64/chrome" 
+# =====================================================
+
 FEATURE_ORDER: List[str] = [
     'NoOfDegitsInURL', 'HasDescription', 'HasSocialNet', 'HasPasswordField', 'HasSubmitButton',
     'HasExternalFormSubmit', 'DomainTitleMatchScore', 'IsHTTPS', 'HasCopyrightInfo',
@@ -67,7 +73,7 @@ USER_AGENTS = [
 
 class FeatureExtractor:
     WHOIS_TIMEOUT: int = 5
-    RENDER_TIMEOUT: int = 20 # Tăng timeout cho Selenium
+    RENDER_TIMEOUT: int = 20
     
     def __init__(self, url: str):
         self.url: str = self._normalize_url(url)
@@ -196,7 +202,6 @@ class FeatureExtractor:
         }
         
         try:
-            # Tăng timeout để xử lý mạng chậm
             self.response = requests.get(self.url, timeout=40, verify=False, allow_redirects=True, headers=headers) 
             self.response.raise_for_status()
             self.soup = BeautifulSoup(self.response.content, 'html.parser')
@@ -314,15 +319,29 @@ class FeatureExtractor:
 
         driver = None
         try:
-            # Cấu hình Chrome để chạy ẩn (Headless)
+            # 1. Cấu hình Chrome Options
             chrome_options = Options()
             chrome_options.add_argument("--headless")
             chrome_options.add_argument("--no-sandbox")
             chrome_options.add_argument("--disable-dev-shm-usage")
             chrome_options.add_argument(f"user-agent={random.choice(USER_AGENTS)}")
             
-            # Khởi tạo WebDriver (GIẢ ĐỊNH ChromeDriver đã được cài đặt trong PATH)
-            driver = webdriver.Chrome(options=chrome_options)
+            # 2. Cấu hình Đường dẫn Chrome Binary Tường minh (Giải quyết Lỗi 58acdd.png)
+            if os.path.exists(CHROME_BINARY_PATH):
+                chrome_options.binary_location = CHROME_BINARY_PATH 
+            else:
+                print(f"Lỗi cấu hình: KHÔNG TÌM THẤY Chrome Binary tại {CHROME_BINARY_PATH}")
+                return # Thoát nếu không tìm thấy Chrome
+
+            # 3. Cấu hình ChromeDriver Service Tường minh (Giải quyết Lỗi 582254.png & 58b09d.png)
+            if not os.path.exists(CHROME_DRIVER_PATH):
+                print(f"Lỗi cấu hình: KHÔNG TÌM THẤY ChromeDriver tại {CHROME_DRIVER_PATH}")
+                return # Thoát nếu không tìm thấy ChromeDriver
+                
+            service = ChromeService(executable_path=CHROME_DRIVER_PATH)
+            
+            # 4. Khởi tạo WebDriver 
+            driver = webdriver.Chrome(service=service, options=chrome_options) 
             driver.set_page_load_timeout(self.RENDER_TIMEOUT)
             
             try:
@@ -338,7 +357,7 @@ class FeatureExtractor:
                 rendered_soup = BeautifulSoup(rendered_html, 'html.parser')
                 layout_similarity = _calculate_layout_similarity(rendered_soup)
                 
-                # Cập nhật DOM features dựa trên Selenium (Chính xác hơn bản tĩnh)
+                # Cập nhật DOM features dựa trên Selenium 
                 def _extract_dom_form_features_dynamic(soup: BeautifulSoup, current_domain: str) -> Dict[str, Any]:
                     f: Dict[str, Any] = {}
                     f['HasPasswordField'] = 1 if len(soup.find_all('input', type='password')) > 0 else 0
@@ -357,20 +376,22 @@ class FeatureExtractor:
                 self.features.update(dynamic_form_features)
 
 
-            except Exception:
+            except Exception as e:
+                # In ra lỗi cụ thể nếu quá trình driver.get() thất bại
+                print(f"⚠️ Lỗi Selenium khi xử lý {self.url}: {e}")
                 pass 
 
             finally:
                 if driver: driver.quit()
         
-        except Exception:
-            pass # Xử lý lỗi nếu không thể khởi tạo driver (ví dụ: ChromeDriver bị thiếu)
+        except Exception as e_init:
+            # In ra lỗi nếu không thể khởi tạo driver (lỗi phổ biến nhất)
+            print(f"❌ Lỗi Khởi tạo WebDriver: {e_init}")
                 
         self.features['V1_PHash_Distance'] = phash_distance
         self.features['V2_Layout_Similarity'] = layout_similarity
 
     def get_all_features(self, label: int) -> Optional[np.ndarray]:
-        """Thực hiện toàn bộ quá trình trích xuất và trả về mảng features."""
         try:
             self._fetch_url_content()
             self._get_url_domain_features()
@@ -386,8 +407,10 @@ class FeatureExtractor:
             return None
 
 # =================================================================
-# III. LOGIC CHẠY ĐA LUỒNG VÀ RESUME
+# III. LOGIC CHẠY ĐA LUỒNG VÀ RESUME (Giữ nguyên)
 # =================================================================
+# ... (Phần load_data_for_extraction, extract_features_worker, append_to_csv_and_log, check_internet_connectivity, run_multiprocess_extraction giữ nguyên)
+# -----------------------------------------------------------------
 
 def load_data_for_extraction(file_path: str) -> pd.DataFrame:
     """Đọc dữ liệu thô và lọc bỏ các URL đã được xử lý (dựa trên log)."""
@@ -395,14 +418,12 @@ def load_data_for_extraction(file_path: str) -> pd.DataFrame:
         print(f"❌ Lỗi: Không tìm thấy file CSV: {file_path}")
         return pd.DataFrame()
 
-    # --- SỬA LỖI MÃ HÓA CSV (Thử các encoding khác nhau) ---
     ENCODINGS_TO_TRY = ['latin-1', 'utf-8', 'iso-8859-1', 'cp1252']
     df_raw = pd.DataFrame()
     success = False
     
     for enc in ENCODINGS_TO_TRY:
         try:
-            # THÊM encoding_errors='ignore' ĐỂ BỎ QUA KÝ TỰ HỎNG TRONG FILE GỐC
             df_raw = pd.read_csv(file_path, encoding=enc, encoding_errors='ignore')
             success = True
             print(f"✅ Đọc file CSV thành công với mã hóa: {enc} (Đã bỏ qua lỗi ký tự).")
@@ -413,11 +434,9 @@ def load_data_for_extraction(file_path: str) -> pd.DataFrame:
     if not success:
         print(f"❌ Thất bại: Không thể đọc file CSV với bất kỳ mã hóa nào. Vui lòng kiểm tra mã hóa file nguồn.")
         return pd.DataFrame()
-    # -----------------------------------------------
 
     COLUMNS_TO_KEEP = ['URL', 'label']
     
-    # Kiểm tra cột để đảm bảo có thể trích xuất
     if not all(col in df_raw.columns for col in COLUMNS_TO_KEEP):
         missing_cols = [col for col in COLUMNS_TO_KEEP if col not in df_raw.columns]
         print(f"❌ Lỗi: File CSV nguồn thiếu các cột cần thiết: {missing_cols}")
@@ -426,11 +445,9 @@ def load_data_for_extraction(file_path: str) -> pd.DataFrame:
     df_base = df_raw[COLUMNS_TO_KEEP].copy()
     df_base.rename(columns={'URL': 'url'}, inplace=True)
 
-    # --- LOGIC TIẾP TỤC (RESUME LOGIC) VỚI KHẢ NĂNG CHỊU LỖI CAO ---
     processed_urls = set()
     if os.path.exists(TEMP_LOG_FILE):
         try:
-            # SỬ DỤNG 'errors='ignore'' ĐỂ TỰ ĐỘNG BỎ QUA KÝ TỰ HỎNG TRONG LOG CŨ
             with open(TEMP_LOG_FILE, 'r', encoding='utf-8', errors='ignore') as f: 
                 for line in f:
                     url_to_add = line.strip()
@@ -456,7 +473,6 @@ def load_data_for_extraction(file_path: str) -> pd.DataFrame:
     return df_remaining
 
 def extract_features_worker(row: pd.Series) -> Optional[Tuple[str, np.ndarray]]:
-    """Hàm worker thực hiện trích xuất cho một dòng dữ liệu."""
     url = row['url']
     label = row['label']
     
@@ -469,7 +485,6 @@ def extract_features_worker(row: pd.Series) -> Optional[Tuple[str, np.ndarray]]:
         return (url, None)
 
 def append_to_csv_and_log(results_buffer: List[Tuple[str, Optional[np.ndarray]]], file_exists: bool):
-    """Ghi kết quả từ buffer vào file CSV và cập nhật log."""
     
     successful_results = [res[1] for res in results_buffer if res[1] is not None]
     
@@ -481,17 +496,14 @@ def append_to_csv_and_log(results_buffer: List[Tuple[str, Optional[np.ndarray]]]
         
     processed_urls = [res[0] for res in results_buffer]
     
-    # Ghi toàn bộ URL trong buffer (thành công và thất bại) vào log bằng utf-8
     with open(TEMP_LOG_FILE, 'a', encoding='utf-8') as f: 
         f.write('\n'.join(processed_urls) + '\n')
             
     return len(successful_results)
 
 def check_internet_connectivity():
-    """Kiểm tra kết nối mạng cơ bản trước khi bắt đầu trích xuất."""
     print("--- 🩺 Kiểm tra kết nối mạng...")
     try:
-        # Sử dụng mục tiêu HTTPS
         requests.get("https://www.google.com", timeout=15) 
         print("✅ Kiểm tra kết nối mạng: OK.")
     except requests.exceptions.RequestException:
@@ -503,7 +515,6 @@ def check_internet_connectivity():
 
 def run_multiprocess_extraction():
     
-    # BƯỚC CHẨN ĐOÁN MẠNG
     check_internet_connectivity()
     
     start_global_time = time.time()
@@ -526,7 +537,6 @@ def run_multiprocess_extraction():
 
     output_file_exists = os.path.exists(OUTPUT_CSV_FILE)
 
-    # 2. Chạy Đa luồng
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
         future_to_row = {executor.submit(extract_features_worker, row): row for row in ALL_ROWS}
         
@@ -551,7 +561,6 @@ def run_multiprocess_extraction():
                 
                 print(f"[{i + 1}/{total_remaining}] Đã xử lý (mới): {i + 1} URL. Thành công (mới): {processed_count_success}. Tổng cộng: {total_complete}. Tốc độ: {avg_speed:.2f} URL/giây.")
     
-    # 4. Kết thúc
     final_elapsed_time = time.time() - start_global_time
     print(f"\n--- TRÍCH XUẤT HOÀN THÀNH ---")
     print(f"Thời gian chạy: {final_elapsed_time:.2f} giây.")
