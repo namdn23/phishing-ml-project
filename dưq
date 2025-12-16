@@ -1,1 +1,12 @@
 sudo apt install -y libnss3 libfontconfig libdbus-1-3 libatk-bridge2.0-0 libgtk-3-0 libgbm-dev
+
+# 1. Cập nhật hệ thống để có thể tìm thấy các gói mới nhất
+sudo apt update
+sudo apt upgrade -y
+
+# 2. Cài đặt các dependencies phổ biến của Playwright
+sudo apt install -y libnss3 libfontconfig libdbus-1-3 libatk-bridge2.0-0 libgtk-3-0 libgbm-dev
+
+# Trong Terminal trên Kali Linux
+rm processed_urls_log.txt
+rm cleaned_extracted_data.csv
