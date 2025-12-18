@@ -1,406 +1,177 @@
- last):
-  File "/usr/lib/python3.13/asyncio/events.py", line 89, in _run
-    self._context.run(self._callback, *self._args)
-    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_connection.py", line 467, in _done_callback
-    exc = future.exception()
-  File "/home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_page.py", line 297, in _on_route
-    handled = await route_handler.handle(route)
-              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_helper.py", line 422, in handle
-    return await self._handle_internal(route)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_helper.py", line 458, in _handle_internal
-    await handler_finished_future
-asyncio.exceptions.CancelledError
-Exception in callback Connection.dispatch.<locals>._done_callback() at /home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_connection.py:466
-handle: <Handle Connection.dispatch.<locals>._done_callback() at /home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_connection.py:466>
-Traceback (most recent call last):
-  File "/usr/lib/python3.13/asyncio/events.py", line 89, in _run
-    self._context.run(self._callback, *self._args)
-    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_connection.py", line 467, in _done_callback
-    exc = future.exception()
-  File "/home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_page.py", line 297, in _on_route
-    handled = await route_handler.handle(route)
-              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_helper.py", line 422, in handle
-    return await self._handle_internal(route)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_helper.py", line 458, in _handle_internal
-    await handler_finished_future
-asyncio.exceptions.CancelledError
-Exception in callback Connection.dispatch.<locals>._done_callback() at /home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_connection.py:466
-handle: <Handle Connection.dispatch.<locals>._done_callback() at /home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_connection.py:466>
-Traceback (most recent call last):
-  File "/usr/lib/python3.13/asyncio/events.py", line 89, in _run
-    self._context.run(self._callback, *self._args)
-    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_connection.py", line 467, in _done_callback
-    exc = future.exception()
-  File "/home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_page.py", line 297, in _on_route
-    handled = await route_handler.handle(route)
-              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_helper.py", line 422, in handle
-    return await self._handle_internal(route)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_helper.py", line 458, in _handle_internal
-    await handler_finished_future
-asyncio.exceptions.CancelledError
-Exception in callback Connection.dispatch.<locals>._done_callback() at /home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_connection.py:466
-handle: <Handle Connection.dispatch.<locals>._done_callback() at /home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_connection.py:466>
-Traceback (most recent call last):
-  File "/usr/lib/python3.13/asyncio/events.py", line 89, in _run
-    self._context.run(self._callback, *self._args)
-    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_connection.py", line 467, in _done_callback
-    exc = future.exception()
-  File "/home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_page.py", line 297, in _on_route
-    handled = await route_handler.handle(route)
-              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_helper.py", line 422, in handle
-    return await self._handle_internal(route)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_helper.py", line 458, in _handle_internal
-    await handler_finished_future
-asyncio.exceptions.CancelledError
-Exception in callback Connection.dispatch.<locals>._done_callback() at /home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_connection.py:466
-handle: <Handle Connection.dispatch.<locals>._done_callback() at /home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_connection.py:466>
-Traceback (most recent call last):
-  File "/usr/lib/python3.13/asyncio/events.py", line 89, in _run
-    self._context.run(self._callback, *self._args)
-    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_connection.py", line 467, in _done_callback
-    exc = future.exception()
-  File "/home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_page.py", line 297, in _on_route
-    handled = await route_handler.handle(route)
-              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_helper.py", line 422, in handle
-    return await self._handle_internal(route)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_helper.py", line 458, in _handle_internal
-    await handler_finished_future
-asyncio.exceptions.CancelledError
-Exception in callback Connection.dispatch.<locals>._done_callback() at /home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_connection.py:466
-handle: <Handle Connection.dispatch.<locals>._done_callback() at /home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_connection.py:466>
-Traceback (most recent call last):
-  File "/usr/lib/python3.13/asyncio/events.py", line 89, in _run
-    self._context.run(self._callback, *self._args)
-    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_connection.py", line 467, in _done_callback
-    exc = future.exception()
-  File "/home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_page.py", line 297, in _on_route
-    handled = await route_handler.handle(route)
-              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_helper.py", line 422, in handle
-    return await self._handle_internal(route)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_helper.py", line 458, in _handle_internal
-    await handler_finished_future
-asyncio.exceptions.CancelledError
-Exception in callback Connection.dispatch.<locals>._done_callback() at /home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_connection.py:466
-handle: <Handle Connection.dispatch.<locals>._done_callback() at /home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_connection.py:466>
-Traceback (most recent call last):
-  File "/usr/lib/python3.13/asyncio/events.py", line 89, in _run
-    self._context.run(self._callback, *self._args)
-    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_connection.py", line 467, in _done_callback
-    exc = future.exception()
-  File "/home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_page.py", line 297, in _on_route
-    handled = await route_handler.handle(route)
-              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_helper.py", line 422, in handle
-    return await self._handle_internal(route)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_helper.py", line 458, in _handle_internal
-    await handler_finished_future
-asyncio.exceptions.CancelledError
-Exception in callback Connection.dispatch.<locals>._done_callback() at /home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_connection.py:466
-handle: <Handle Connection.dispatch.<locals>._done_callback() at /home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_connection.py:466>
-Traceback (most recent call last):
-  File "/usr/lib/python3.13/asyncio/events.py", line 89, in _run
-    self._context.run(self._callback, *self._args)
-    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_connection.py", line 467, in _done_callback
-    exc = future.exception()
-  File "/home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_page.py", line 297, in _on_route
-    handled = await route_handler.handle(route)
-              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_helper.py", line 422, in handle
-    return await self._handle_internal(route)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_helper.py", line 458, in _handle_internal
-    await handler_finished_future
-asyncio.exceptions.CancelledError
-Exception in callback Connection.dispatch.<locals>._done_callback() at /home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_connection.py:466
-handle: <Handle Connection.dispatch.<locals>._done_callback() at /home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_connection.py:466>
-Traceback (most recent call last):
-  File "/usr/lib/python3.13/asyncio/events.py", line 89, in _run
-    self._context.run(self._callback, *self._args)
-    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_connection.py", line 467, in _done_callback
-    exc = future.exception()
-  File "/home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_page.py", line 297, in _on_route
-    handled = await route_handler.handle(route)
-              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_helper.py", line 422, in handle
-    return await self._handle_internal(route)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_helper.py", line 458, in _handle_internal
-    await handler_finished_future
-asyncio.exceptions.CancelledError
-Exception in callback Connection.dispatch.<locals>._done_callback() at /home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_connection.py:466
-handle: <Handle Connection.dispatch.<locals>._done_callback() at /home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_connection.py:466>
-Traceback (most recent call last):
-  File "/usr/lib/python3.13/asyncio/events.py", line 89, in _run
-    self._context.run(self._callback, *self._args)
-    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_connection.py", line 467, in _done_callback
-    exc = future.exception()
-  File "/home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_page.py", line 297, in _on_route
-    handled = await route_handler.handle(route)
-              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_helper.py", line 422, in handle
-    return await self._handle_internal(route)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_helper.py", line 458, in _handle_internal
-    await handler_finished_future
-asyncio.exceptions.CancelledError
-Exception in callback Connection.dispatch.<locals>._done_callback() at /home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_connection.py:466
-handle: <Handle Connection.dispatch.<locals>._done_callback() at /home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_connection.py:466>
-Traceback (most recent call last):
-  File "/usr/lib/python3.13/asyncio/events.py", line 89, in _run
-    self._context.run(self._callback, *self._args)
-    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_connection.py", line 467, in _done_callback
-    exc = future.exception()
-  File "/home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_page.py", line 297, in _on_route
-    handled = await route_handler.handle(route)
-              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_helper.py", line 422, in handle
-    return await self._handle_internal(route)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_helper.py", line 458, in _handle_internal
-    await handler_finished_future
-asyncio.exceptions.CancelledError
-Exception in callback Connection.dispatch.<locals>._done_callback() at /home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_connection.py:466
-handle: <Handle Connection.dispatch.<locals>._done_callback() at /home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_connection.py:466>
-Traceback (most recent call last):
-  File "/usr/lib/python3.13/asyncio/events.py", line 89, in _run
-    self._context.run(self._callback, *self._args)
-    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_connection.py", line 467, in _done_callback
-    exc = future.exception()
-  File "/home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_page.py", line 297, in _on_route
-    handled = await route_handler.handle(route)
-              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_helper.py", line 422, in handle
-    return await self._handle_internal(route)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_helper.py", line 458, in _handle_internal
-    await handler_finished_future
-asyncio.exceptions.CancelledError
-Exception in callback Connection.dispatch.<locals>._done_callback() at /home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_connection.py:466
-handle: <Handle Connection.dispatch.<locals>._done_callback() at /home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_connection.py:466>
-Traceback (most recent call last):
-  File "/usr/lib/python3.13/asyncio/events.py", line 89, in _run
-    self._context.run(self._callback, *self._args)
-    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_connection.py", line 467, in _done_callback
-    exc = future.exception()
-  File "/home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_page.py", line 297, in _on_route
-    handled = await route_handler.handle(route)
-              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_helper.py", line 422, in handle
-    return await self._handle_internal(route)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_helper.py", line 458, in _handle_internal
-    await handler_finished_future
-asyncio.exceptions.CancelledError
-Exception in callback Connection.dispatch.<locals>._done_callback() at /home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_connection.py:466
-handle: <Handle Connection.dispatch.<locals>._done_callback() at /home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_connection.py:466>
-Traceback (most recent call last):
-  File "/usr/lib/python3.13/asyncio/events.py", line 89, in _run
-    self._context.run(self._callback, *self._args)
-    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_connection.py", line 467, in _done_callback
-    exc = future.exception()
-  File "/home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_page.py", line 297, in _on_route
-    handled = await route_handler.handle(route)
-              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_helper.py", line 422, in handle
-    return await self._handle_internal(route)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_helper.py", line 458, in _handle_internal
-    await handler_finished_future
-asyncio.exceptions.CancelledError
-Exception in callback Connection.dispatch.<locals>._done_callback() at /home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_connection.py:466
-handle: <Handle Connection.dispatch.<locals>._done_callback() at /home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_connection.py:466>
-Traceback (most recent call last):
-  File "/usr/lib/python3.13/asyncio/events.py", line 89, in _run
-    self._context.run(self._callback, *self._args)
-    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_connection.py", line 467, in _done_callback
-    exc = future.exception()
-  File "/home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_page.py", line 297, in _on_route
-    handled = await route_handler.handle(route)
-              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_helper.py", line 422, in handle
-    return await self._handle_internal(route)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_helper.py", line 458, in _handle_internal
-    await handler_finished_future
-asyncio.exceptions.CancelledError
-Exception in callback Connection.dispatch.<locals>._done_callback() at /home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_connection.py:466
-handle: <Handle Connection.dispatch.<locals>._done_callback() at /home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_connection.py:466>
-Traceback (most recent call last):
-  File "/usr/lib/python3.13/asyncio/events.py", line 89, in _run
-    self._context.run(self._callback, *self._args)
-    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_connection.py", line 467, in _done_callback
-    exc = future.exception()
-  File "/home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_page.py", line 297, in _on_route
-    handled = await route_handler.handle(route)
-              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_helper.py", line 422, in handle
-    return await self._handle_internal(route)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_helper.py", line 458, in _handle_internal
-    await handler_finished_future
-asyncio.exceptions.CancelledError
-Exception in callback Connection.dispatch.<locals>._done_callback() at /home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_connection.py:466
-handle: <Handle Connection.dispatch.<locals>._done_callback() at /home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_connection.py:466>
-Traceback (most recent call last):
-  File "/usr/lib/python3.13/asyncio/events.py", line 89, in _run
-    self._context.run(self._callback, *self._args)
-    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_connection.py", line 467, in _done_callback
-    exc = future.exception()
-  File "/home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_page.py", line 297, in _on_route
-    handled = await route_handler.handle(route)
-              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_helper.py", line 422, in handle
-    return await self._handle_internal(route)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_helper.py", line 458, in _handle_internal
-    await handler_finished_future
-asyncio.exceptions.CancelledError
-Exception in callback Connection.dispatch.<locals>._done_callback() at /home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_connection.py:466
-handle: <Handle Connection.dispatch.<locals>._done_callback() at /home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_connection.py:466>
-Traceback (most recent call last):
-  File "/usr/lib/python3.13/asyncio/events.py", line 89, in _run
-    self._context.run(self._callback, *self._args)
-    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_connection.py", line 467, in _done_callback
-    exc = future.exception()
-  File "/home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_page.py", line 297, in _on_route
-    handled = await route_handler.handle(route)
-              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_helper.py", line 422, in handle
-    return await self._handle_internal(route)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_helper.py", line 458, in _handle_internal
-    await handler_finished_future
-asyncio.exceptions.CancelledError
-Exception in callback Connection.dispatch.<locals>._done_callback() at /home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_connection.py:466
-handle: <Handle Connection.dispatch.<locals>._done_callback() at /home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_connection.py:466>
-Traceback (most recent call last):
-  File "/usr/lib/python3.13/asyncio/events.py", line 89, in _run
-    self._context.run(self._callback, *self._args)
-    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_connection.py", line 467, in _done_callback
-    exc = future.exception()
-  File "/home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_page.py", line 297, in _on_route
-    handled = await route_handler.handle(route)
-              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_helper.py", line 422, in handle
-    return await self._handle_internal(route)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_helper.py", line 458, in _handle_internal
-    await handler_finished_future
-asyncio.exceptions.CancelledError
-Exception in callback Connection.dispatch.<locals>._done_callback() at /home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_connection.py:466
-handle: <Handle Connection.dispatch.<locals>._done_callback() at /home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_connection.py:466>
-Traceback (most recent call last):
-  File "/usr/lib/python3.13/asyncio/events.py", line 89, in _run
-    self._context.run(self._callback, *self._args)
-    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_connection.py", line 467, in _done_callback
-    exc = future.exception()
-  File "/home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_page.py", line 297, in _on_route
-    handled = await route_handler.handle(route)
-              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_helper.py", line 422, in handle
-    return await self._handle_internal(route)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_helper.py", line 458, in _handle_internal
-    await handler_finished_future
-asyncio.exceptions.CancelledError
-Exception in callback Connection.dispatch.<locals>._done_callback() at /home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_connection.py:466
-handle: <Handle Connection.dispatch.<locals>._done_callback() at /home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_connection.py:466>
-Traceback (most recent call last):
-  File "/usr/lib/python3.13/asyncio/events.py", line 89, in _run
-    self._context.run(self._callback, *self._args)
-    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_connection.py", line 467, in _done_callback
-    exc = future.exception()
-  File "/home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_page.py", line 297, in _on_route
-    handled = await route_handler.handle(route)
-              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_helper.py", line 422, in handle
-    return await self._handle_internal(route)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_helper.py", line 458, in _handle_internal
-    await handler_finished_future
-asyncio.exceptions.CancelledError
-Exception in callback Connection.dispatch.<locals>._done_callback() at /home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_connection.py:466
-handle: <Handle Connection.dispatch.<locals>._done_callback() at /home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_connection.py:466>
-Traceback (most recent call last):
-  File "/usr/lib/python3.13/asyncio/events.py", line 89, in _run
-    self._context.run(self._callback, *self._args)
-    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_connection.py", line 467, in _done_callback
-    exc = future.exception()
-  File "/home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_page.py", line 297, in _on_route
-    handled = await route_handler.handle(route)
-              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_helper.py", line 422, in handle
-    return await self._handle_internal(route)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_helper.py", line 458, in _handle_internal
-    await handler_finished_future
-asyncio.exceptions.CancelledError
-Exception in callback Connection.dispatch.<locals>._done_callback() at /home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_connection.py:466
-handle: <Handle Connection.dispatch.<locals>._done_callback() at /home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_connection.py:466>
-Traceback (most recent call last):
-  File "/usr/lib/python3.13/asyncio/events.py", line 89, in _run
-    self._context.run(self._callback, *self._args)
-    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_connection.py", line 467, in _done_callback
-    exc = future.exception()
-  File "/home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_page.py", line 297, in _on_route
-    handled = await route_handler.handle(route)
-              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_helper.py", line 422, in handle
-    return await self._handle_internal(route)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_helper.py", line 458, in _handle_internal
-    await handler_finished_future
-asyncio.exceptions.CancelledError
-Exception in callback Connection.dispatch.<locals>._done_callback() at /home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_connection.py:466
-handle: <Handle Connection.dispatch.<locals>._done_callback() at /home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_connection.py:466>
-Traceback (most recent call last):
-  File "/usr/lib/python3.13/asyncio/events.py", line 89, in _run
-    self._context.run(self._callback, *self._args)
-    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_connection.py", line 467, in _done_callback
-    exc = future.exception()
-  File "/home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_page.py", line 297, in _on_route
-    handled = await route_handler.handle(route)
-              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_helper.py", line 422, in handle
-    return await self._handle_internal(route)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright/_impl/_helper.py", line 458, in _handle_internal
-    await handler_finished_future
-
+,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,http://www.playe.vidto.se
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://bnk30id.firebaseapp.com/
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://www.corpus.tools
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://ren1.shop/
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://www.firstmention.com
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://www.blood.co.uk
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,http://www.asia-mine.beeppool.org
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://s.id/1ksam
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://www.dlanham.com
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://www.trendtablet.com
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://www.ustayemektarifleri.com
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://www.dpnotes.com
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,http://www.zain.network
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://gateway.pinata.cloud/ipfs/bafybeifrt2zpyosrpzi5mkb26tnuujn3so4iwrxg5spw2ncytiu6uiiubu/
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://www.n-tama.k12.ia.us
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://www.necta.us
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,http://mizahibamk-co-jp.nxhjjt.com/
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://www.telluridefilmfestival.org
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://www.essays.quotidiana.org
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://www.record2007.com
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://ltpakid-paulaudrey1727228.codeanyapp.com/ecolis/track/dh2tayue9asux7b262/
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://www.jackreports.com
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,http://paypal-support.com.desenvolvedortheosbank.com.br/login.php?cmd=_account-details&amp;dispatch=259a4cd97c57f66a7a00e2ee9f01f6cb137420
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://wwwihb-cmactacna.com/
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://www.ballstatedaily.com
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,http://www.campervan.love
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://www.krcs.org.kw
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,1.0,0.0,0.0,-0.0,http://www.nvfjvtntt.cf
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://www.gamezone.com
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://www.liszt.nl
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://www.vast.bank
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,http://esquemascar.blogspot.com.ng/
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,http://www.webproxy.com
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://www.acgov.org
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://www.cottonsisters.com
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,http://www.issth.com
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://www.nicematin.com
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://email-update-service.weeblysite.com/
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://www.cheltenham.org
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://www.beta-uk.org
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,http://www.vidhog.com
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,http://www.vieclamsaigon.vn
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://www.aemilius.net
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,http://www.omwowxis.ga
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://www.ports-monaco.com
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://www.lawa.org.nz
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://www.paraview.org
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://www.mesharepoint.com/apc/13b42c8c-cbcf-4e3d-9d20-f55b7b5ee3c1/8c95a23b-9bdd-4140-bd54-c41760d0cd0a/5be1624a-5ff8-4432-927f-6e29a91f65a1/login?id=sg9jagk3mze4mkhlze81aezwsjewmlravw9iqnhiamvobjl3og9aber5dgfck3dzznhqzehsmlp5vti3rnjrquxmmtnewk5wwnp6eg4zruswbetevty4ewhvz0vyznhrcdk1ovbawu5nsje1vlpiswtzdedzevdjvhdwsevqnwjsvtrewevuwmr4meh6dzlsvhvjakfqodrvtxl4dzbwzulsvzlkwxpsz0rpmfpps1ayoefucvpsmw5ak1y5mzv2nktrd3mwrkt3vdrhl0fvck5vdg1puepdbgpxekh2slqzrmt1axzumwnncy8wsnlsevc2zvfvtzk5cvdwdgpiqmjzeepwl2lzq1rybepgs09zwdhrbk0wcfi1wxhxeutbc2xxue9rahdncuu0bhuwztzquhm1m3hivc8zk0vac0xbdjrmceg5eu9sedmvkzltqudiwdludsszwhfdatrqr3uynvzmsgnuc1cxy2lia0tznuw4b1jxa0n2y2viyisz
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://www.steelstampsinc.com
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://web-51093.firebaseapp.com/
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://www.spacehijackers.org
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://www.scannagallo.com
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://www.bernardiparts.com
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://www.praxity.com
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://www.nya-interieurontwerp.nl
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://www.onetinytribe.com
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://www.ellpeck.de
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,http://www.medicareschoolcommunity.com
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,http://cb97040.tw1.ru/
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://www.group-office.com
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://www.alachuatemple.com
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://www.sanvitolocaposhuttle.com
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,http://www.sexxxpress.com
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://www.ocamagazine.com
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://www.vizium.com
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,http://personas-atencion-mailitauweb.atsnx.com/
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://www.themaineedge.com
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://www.ahp.org
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://monalisaschool.in/media/1g/ali1/ali/login.php
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,http://www.amazoczn-co-jp.amazocm.laijcu.top/
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://www.laureus.com
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://www.megaleecher.net
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://www.chordscenter.net
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://www.cherryactiveaustralia.com.au
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://www.metalfan.ro
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://www.foodafactoflife.org.uk
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://www.sweetlikecocoa.com
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,1.0,0.0,0.0,0.0,https://vynola.co.uk/online/login.php?page=/user-management/confirmation&setlng=en&returnurl=https://www1.scotiaonline.scotiabank.com/online/authentication/authentication.bns?language=english
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://www.bordeaux.aeroport.fr
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://www.rcdmonterey.org
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://www.canardpc.com
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://www.mockupworld.co
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://www.lifeice.com
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://bellsouthverituti8444.webflow.io/
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://gateway.ipfs.io/ipfs/bafybeiasz3wbij54fe3wqa7iv5pojte7fbc7tfncdnlkbnfnr2rmafkqti/
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://4d519c34-4c80-41ce-8566-bba70d7760e3.id.repl.co/
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://cavernousbogussynerg--blackath.repl.co/des/index.php
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://docs.google.com/forms/d/e/1faipqlse_mo9pzgdahzdgz0wctr7lm0cqm_zwos8ljc4cqgtvnqfmfq/viewform
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://www.jaspital.com
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://www.petercollingridge.co.uk
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://www.was.edu.hk
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://www.powertransformernews.com
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://www.ucdc.ro
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://www.muellerindustries.com
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://j42vni.webwave.dev/
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://www.roaringspringlibrary.org
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://www.nossalhs.vic.edu.au
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,http://decentraland-game.org
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,http://www.gromstudio.com
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,http://www.moyiinvestments.com
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://jpostcn.com/
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,http://www.tomlogan.no-p.biz
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://www.imperfectlyperfectmama.com
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://www.uniquelyyoursbridal.com
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,http://www.freewha.com
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://www.careerindia.com
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://www.chansons-net.com
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://www.nangdee.com
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,http://www.beta-api.blocktrail.com
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://www.osha.gov.tw
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://www.mallorcaweddinghouse.com
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://www.kleague.com
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://delectablequalifiedservice.pruebadefe1.repl.co/
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,http://www.xp654.com
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://www.britishmusicarchive.com
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://www.stevehahnautogroup.com
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://www.gbopera.it
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://www.nickventurella.com
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://www.digipri.com
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://desbloqueopreventivo.activedinamica.repl.co/
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://www.choicesoftheheart.com
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://www.thepedestalmagazine.com
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://infosamendes-gouv.com/
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://ttt8b8.webwave.dev/
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://www.uncoveredpolitics.com
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://www.signature.ie
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,http://cy40981.tw1.ru/sg/a3ef5a38673cd62/index.php?lsg#a3ef5a38673cd6230
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://www.freestyledisc.org
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://layered-ai.com/-/hupo/hu/
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://www.installation-international.com
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://www.wits.ac.za
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,http://www.staraba.com
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,http://www.sitecgps.com
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,http://www.iran-sanna.gq
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://www.bumpershine.com
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://www.vandevere.com
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://www.bull18.com
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,http://online-login-ita.67-223-117-24.cprapid.com/home/index.php?sessione=4547bdc30620d520036ae96acef07e661b4ed91c9d30164cdeb61a4caaff2d044a3fd599
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://www.rya.org.uk
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://1.bancolombiaplo.repl.co/
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://qcgnbk.webwave.dev/
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,http://www.8ff.net
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://www.songtsen.org
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,http://www.materic.or.kr
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://meta-business-appeal-105-22101.web.app/
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://www.synovus.com
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://www.2doapp.com
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://www.fitnessfinders.net
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://www.elnacional.cat
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,http://www.bestbuywindow.com
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,http://www.in.mt
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,http://www.otpfamsdkf.ml
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://www.newhavenct.gov
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://www.tcd.ie
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://www.kultunaut.dk
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,http://1636365.com/assets/40popperjs.36402333.js/assets/40element-plus.6b0e43d0.js/assets/40vue.8c84d7fe.js/assets/assets/
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,http://www.strizhankov.ru
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,http://ct52590.tw1.ru/agricolenouvelleapp-nous2022/client/dep.html
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://www.365f03.com
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://d7ezcm.webwave.dev/
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://www.clean.io
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://maildinshaakckjnw342.web.app/
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://cloudflare-ipfs.com/ipfs/bafybeibfiwlu6h6rhwlcleb2tgwl4pj554xqvwrjzgebm2cohpcdjgvjem/
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://www.eng.ku.ac.th
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://hd2-mg-dw2.web.app/
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://www.flyfishingpatagonia.com
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://www.toothspadentistry.com
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://www.brendamargriet.com
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://www.horrordna.com
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,http://010auth0.duckdns.org/personal.html
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://www.braziers.org.uk
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,http://creditiperhabbogratissicuro100.blogspot.it/2011/02/habbo-crediti-gratis-sicuro-100.html
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://www.glossy.co
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://rubertijames-b1517.firebaseapp.com/
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,http://www.is-a-personaltrainer.com
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,http://www.mypi.co
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,https://www.americaabroadmedia.org
