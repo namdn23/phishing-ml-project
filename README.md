@@ -17,18 +17,18 @@ from bs4 import BeautifulSoup
 from collections import Counter
 
 # =================================================================
-# I. CẤU HÌNH & DANH SÁCH FEATURES
+# I. CẤU HÌNH TỐI ƯU (12 NHÂN CPU & TIẾT KIỆM DATA 5G)
 # =================================================================
 RAW_CSV_FILE = 'PhiUSIIL_Phishing_URL_Dataset.csv'
 TEMP_LOG_FILE = 'extraction_checkpoint.csv'
 FINAL_OUTPUT = 'PhiUSIIL_Extracted_Full.csv'
 
-# TỐI ƯU CHO MÁY ẢO 8 NHÂN VT-x
-MAX_WORKERS = 20  # Tăng lên 20 luồng để tận dụng CPU Intel Ultra 5H
-CHUNK_SIZE = 10   # Mỗi luồng xử lý 10 URL rồi reset trình duyệt để giải phóng RAM
+# THÔNG SỐ VẬN HÀNH
+MAX_WORKERS = 25  # Tối ưu cho CPU 12 nhân
+CHUNK_SIZE = 40   # Reset trình duyệt mỗi 40 URL để giải phóng RAM và sạch session
 TARGET_PHASH = imagehash.hex_to_hash('9880e61f1c7e0c4f')
 
-# Các cột lấy từ file cũ
+# Các cột cần giữ từ file gốc
 OLD_KEEP_COLS = [
     'URL', 'NoOfDegitsInURL', 'HasDescription', 'HasSocialNet', 'HasPasswordField', 
     'HasSubmitButton', 'HasExternalFormSubmit', 'DomainTitleMatchScore', 
@@ -36,7 +36,7 @@ OLD_KEEP_COLS = [
 ]
 
 # =================================================================
-# II. HÀM HỖ TRỢ TÍNH TOÁN
+# II. HÀM HỖ TRỢ TÍNH TOÁN (TĨNH)
 # =================================================================
 def get_entropy(text):
     if not text or len(text) == 0: return 0.0
@@ -46,6 +46,8 @@ def get_entropy(text):
 def get_tls_issuer(hostname):
     try:
         context = ssl.create_default_context()
+        context.check_hostname = False
+        context.verify_mode = ssl.CERT_NONE
         with socket.create_connection((hostname, 443), timeout=3) as sock:
             with context.wrap_socket(sock, server_hostname=hostname) as ssock:
                 cert = ssock.getpeercert()
@@ -54,7 +56,7 @@ def get_tls_issuer(hostname):
     except: return 'None'
 
 # =================================================================
-# III. LOGIC TRÍCH XUẤT TỔNG HỢP
+# III. LOGIC TRÍCH XUẤT (TỐI ƯU CHẶN DATA RÁC)
 # =================================================================
 def extract_full_features(page, url):
     res = {k: 0.0 for k in [
@@ -66,6 +68,11 @@ def extract_full_features(page, url):
     ]}
     
     try:
+        # CHẶN TẢI TÀI NGUYÊN NẶNG (Tiết kiệm ~90% Data 5G)
+        page.route("**/*", lambda route: route.abort() 
+                   if route.request.resource_type in ["image", "media", "font", "other"] 
+                   else route.continue_())
+
         ext = tldextract.extract(url)
         domain = f"{ext.domain}.{ext.suffix}"
         
@@ -77,24 +84,27 @@ def extract_full_features(page, url):
             res['V4_DNS_Volatility_Count'] = len(socket.gethostbyname_ex(domain)[2])
         except: res['V4_DNS_Volatility_Count'] = 0
         
-        issuer = get_tls_issuer(domain)
-        res['V5_TLS_Issuer_Reputation'] = 1.0 if issuer != 'None' else 0.0
+        res['V5_TLS_Issuer_Reputation'] = 1.0 if get_tls_issuer(domain) != 'None' else 0.0
 
         # 2. TRÍCH XUẤT ĐỘNG (PLAYWRIGHT)
-        page.goto(url, timeout=25000, wait_until="domcontentloaded") # Tăng tốc bằng cách đợi DOM xong thay vì load toàn bộ
+        # wait_until="domcontentloaded" giúp chạy nhanh và ít tốn data hơn "networkidle"
+        page.goto(url, timeout=20000, wait_until="domcontentloaded") 
         res['V10_HTTP_Extraction_Success'] = 1
         
-        # V1: PHash Distance (Screenshot)
+        # V1: PHash Distance (Vẫn screenshot được layout khung xương)
         img_bytes = page.screenshot()
         img = Image.open(io.BytesIO(img_bytes)).convert('L')
         res['V1_PHash_Distance'] = (imagehash.phash(img) - TARGET_PHASH) / 64.0
         
-        # V2: Layout Similarity
-        soup = BeautifulSoup(page.content(), 'html.parser')
+        # Parse HTML bằng BeautifulSoup
+        content = page.content()
+        soup = BeautifulSoup(content, 'html.parser')
+        
+        # V2: Layout Similarity (Độ sâu DOM)
         depths = [len(list(t.parents)) for t in soup.find_all(True)]
         res['V2_Layout_Similarity'] = np.clip(1.0 - (max(depths or [0])/40.0), 0, 1)
         
-        # V6: JS Entropy
+        # V6: JS Entropy (Không chặn script nên vẫn lấy được code)
         js_code = "".join([s.text for s in soup.find_all('script')])
         res['V6_JS_Entropy'] = get_entropy(js_code)
         
@@ -123,14 +133,17 @@ def extract_full_features(page, url):
 def thread_worker(chunk_df):
     results = []
     with sync_playwright() as p:
-        # Tối ưu Chrome: Tắt sandbox, tắt GPU, bỏ qua rác để tăng tốc trên VM
         browser = p.chromium.launch(headless=True, args=[
             "--no-sandbox", 
+            "--disable-setuid-sandbox",
             "--disable-dev-shm-usage",
             "--disable-gpu",
-            "--js-flags='--max-old-space-size=512'"
+            "--blink-settings=imagesEnabled=false", # Chặn ảnh từ lõi trình duyệt
         ])
-        context = browser.new_context(viewport={'width': 1280, 'height': 720})
+        context = browser.new_context(
+            viewport={'width': 1280, 'height': 720},
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36"
+        )
         page = context.new_page()
         
         for _, row in chunk_df.iterrows():
@@ -144,20 +157,19 @@ def thread_worker(chunk_df):
 def main():
     start_session_time = time.time()
     
-    # 1. Đọc dữ liệu gốc
     if not os.path.exists(RAW_CSV_FILE):
         print(f"❌ Lỗi: Không tìm thấy {RAW_CSV_FILE}"); return
+        
     df_raw = pd.read_csv(RAW_CSV_FILE, usecols=OLD_KEEP_COLS)
     total_all = len(df_raw)
 
-    # 2. Xử lý Checkpoint (Đọc các URL đã làm xong)
+    # Đọc Checkpoint để chạy tiếp
     if os.path.exists(TEMP_LOG_FILE):
         df_checkpoint = pd.read_csv(TEMP_LOG_FILE, usecols=['URL_KEY'])
         processed_urls = set(df_checkpoint['URL_KEY'].astype(str))
     else:
         processed_urls = set()
     
-    # Lọc danh sách còn lại
     df_todo = df_raw[~df_raw['URL'].astype(str).isin(processed_urls)]
     num_already_done = len(processed_urls)
     total_todo = len(df_todo)
@@ -165,11 +177,9 @@ def main():
     if total_todo == 0:
         print("✅ Đã hoàn thành xử lý toàn bộ dữ liệu."); return
 
-    print(f"🚀 Tổng cộng: {total_all} URL")
-    print(f"📦 Đã xong: {num_already_done} | Còn lại: {total_todo}")
-    print(f"🔥 Đang khởi chạy {MAX_WORKERS} luồng...")
+    print(f"🚀 Tổng cộng: {total_all} | Đã xong: {num_already_done} | Còn lại: {total_todo}")
+    print(f"🔥 Đang chạy {MAX_WORKERS} luồng trên CPU 12 nhân...")
 
-    # 3. Chạy đa luồng
     chunks = [df_todo[i:i + CHUNK_SIZE] for i in range(0, total_todo, CHUNK_SIZE)]
     
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
@@ -177,36 +187,27 @@ def main():
         
         for i, future in enumerate(as_completed(futures), 1):
             batch_data = future.result()
-            
-            # Lưu ngay xuống file checkpoint
             pd.DataFrame(batch_data).to_csv(TEMP_LOG_FILE, mode='a', index=False, header=not os.path.exists(TEMP_LOG_FILE))
             
-            # Tính toán tiến độ cộng dồn
+            # Cập nhật tiến độ
             current_batch_done = i * CHUNK_SIZE
-            total_current_done = num_already_done + current_batch_done
+            total_current_done = min(num_already_done + current_batch_done, total_all)
+            elapsed = time.time() - start_session_time
+            speed = current_batch_done / elapsed
             
-            # Tính tốc độ trên phiên hiện tại
-            elapsed_session = time.time() - start_session_time
-            speed = current_batch_done / elapsed_session
-            
-            # Tránh hiển thị vượt quá 100% do sai số chunk cuối
-            display_done = min(total_current_done, total_all)
-            
-            print(f"➜ Tiến độ: {display_done}/{total_all} ({display_done/total_all*100:.2f}%) "
-                  f"| Tốc độ: {speed:.2f} URL/s | ETA: {(total_all - display_done)/speed/60:.1f} phút")
+            print(f"➜ [{datetime.now().strftime('%H:%M:%S')}] {total_current_done}/{total_all} ({total_current_done/total_all*100:.2f}%) "
+                  f"| Tốc độ: {speed:.2f} URL/s | ETA: {(total_all - total_current_done)/speed/60:.1f} phút")
 
-    # 4. Hợp nhất cuối cùng
+    # Hợp nhất cuối cùng
     print("\n🔄 Đang tạo file kết quả cuối cùng...")
     df_new = pd.read_csv(TEMP_LOG_FILE).drop_duplicates('URL_KEY')
     df_final = pd.merge(df_raw, df_new, left_on='URL', right_on='URL_KEY', how='inner')
     
-    # Tạo biến Alarms
     for col in ['V1_PHash_Distance', 'V2_Layout_Similarity', 'V6_JS_Entropy', 'V7_Text_Readability_Score']:
         df_final[f'Alarm_{col}_Missing'] = np.where(df_final['V10_HTTP_Extraction_Success'] == 0, 1, 0)
 
     df_final.drop(columns=['URL_KEY'], inplace=True)
     df_final.to_csv(FINAL_OUTPUT, index=False)
-    
     print(f"✅ HOÀN TẤT! File: {FINAL_OUTPUT}")
 
 if __name__ == "__main__":
