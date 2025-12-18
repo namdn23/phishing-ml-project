@@ -1,5 +1,5 @@
-# Thêm 3 cột Alarm (giá trị 0) vào cuối tất cả dòng cũ
-sed -i 's/$/ ,0,0,0/' extraction_checkpoint.csv
+# Xóa tất cả dấu cách nằm ngay trước dấu phẩy
+sed -i 's/ ,/,/g' extraction_checkpoint.csv
 
-# Sửa Header để code nhận diện đúng cột
-sed -i '1s/$/ ,Alarm_System_Error,Alarm_Capture_Failed,Alarm_Empty_Content/' extraction_checkpoint.csv
+# Kiểm tra lại 5 dòng đầu xem đã sát nhau chưa
+head -n 5 extraction_checkpoint.csv
