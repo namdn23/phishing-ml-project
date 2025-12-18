@@ -24,8 +24,8 @@ RAW_CSV_FILE = 'PhiUSIIL_Phishing_URL_Dataset.csv'
 TEMP_LOG_FILE = 'extraction_checkpoint.csv'
 FINAL_OUTPUT = 'PhiUSIIL_Extracted_Full.csv'
 
-# THÔNG SỐ VẬN HÀNH (Đã tối ưu cho cấu hình máy của bạn)
-MAX_WORKERS = 20    # Số luồng an toàn để tránh crash
+# THÔNG SỐ VẬN HÀNH
+MAX_WORKERS = 20    # Số luồng xử lý song song
 CHUNK_SIZE = 25     # Ghi file sau mỗi 25 URL mỗi luồng
 TIMEOUT_MS = 10000  # 10 giây cho mỗi URL
 TARGET_PHASH = imagehash.hex_to_hash('9880e61f1c7e0c4f')
@@ -37,7 +37,7 @@ OLD_KEEP_COLS = [
 ]
 
 # =================================================================
-# II. CÔNG CỤ HỆ THỐNG (DỌN RAM & TLS)
+# II. CÔNG CỤ HỆ THỐNG
 # =================================================================
 def clear_linux_cache():
     """Giải phóng bộ nhớ đệm RAM trong Kali Linux"""
@@ -63,19 +63,19 @@ def get_tls_issuer(hostname):
     except: return 'None'
 
 # =================================================================
-# III. LOGIC TRÍCH XUẤT ĐẶC TRƯNG
+# III. LOGIC TRÍCH XUẤT ĐẶC TRƯNG (ĐÃ BỎ ALARM)
 # =================================================================
 def extract_full_features(page, url):
+    # Khởi tạo 14 đặc trưng kỹ thuật
     res = {k: 0.0 for k in [
         'V10_HTTP_Extraction_Success', 'V11_WHOIS_Extraction_Success', 'V1_PHash_Distance', 
         'V2_Layout_Similarity', 'V6_JS_Entropy', 'V7_Text_Readability_Score', 
         'V8_Total_IFrames', 'V9_Has_Hidden_IFrame', 'V5_TLS_Issuer_Reputation', 
         'V3_Domain_Age_Days', 'V4_DNS_Volatility_Count', 'Is_Top_1M_Domain', 
-        'V22_IP_Subdomain_Pattern', 'V23_Entropy_Subdomain',
-        'Alarm_System_Error', 'Alarm_Capture_Failed', 'Alarm_Empty_Content'
+        'V22_IP_Subdomain_Pattern', 'V23_Entropy_Subdomain'
     ]}
     try:
-        # Chặn các tài nguyên không cần thiết để tăng tốc
+        # Chặn các tài nguyên nặng để tăng tốc
         page.route("**/*", lambda r: r.abort() if r.request.resource_type in ["image", "media", "font", "stylesheet"] else r.continue_())
         
         ext = tldextract.extract(url)
@@ -84,40 +84,43 @@ def extract_full_features(page, url):
         res['V22_IP_Subdomain_Pattern'] = 1 if re.search(r'\d+\.\d+', ext.subdomain) else 0
         res['V23_Entropy_Subdomain'] = get_entropy(ext.subdomain)
         res['Is_Top_1M_Domain'] = 1 if ext.domain in ['google', 'facebook', 'microsoft', 'apple', 'amazon'] else 0
+        
         try: res['V4_DNS_Volatility_Count'] = len(socket.gethostbyname_ex(domain)[2])
         except: pass
+        
         res['V5_TLS_Issuer_Reputation'] = 1.0 if get_tls_issuer(domain) != 'None' else 0.0
 
         # Truy cập trang web
         page.goto(url, timeout=TIMEOUT_MS, wait_until="commit") 
         res['V10_HTTP_Extraction_Success'] = 1
         
-        # Chụp ảnh và tính pHash
+        # Chụp ảnh và tính pHash (Lỗi thì mặc định 0.5)
         try:
-            img_bytes = page.screenshot(timeout=5000)
+            img_bytes = page.screenshot(timeout=3000)
             img = Image.open(io.BytesIO(img_bytes)).convert('L')
             res['V1_PHash_Distance'] = (imagehash.phash(img) - TARGET_PHASH) / 64.0
         except:
-            res['Alarm_Capture_Failed'] = 1
             res['V1_PHash_Distance'] = 0.5
 
         # Phân tích nội dung DOM
         content = page.content()
         soup = BeautifulSoup(content, 'html.parser')
         full_text = soup.get_text().strip()
-        if len(content) < 500 or not full_text: res['Alarm_Empty_Content'] = 1
 
         depths = [len(list(t.parents)) for t in soup.find_all(True)]
         res['V2_Layout_Similarity'] = np.clip(1.0 - (max(depths or [0])/40.0), 0, 1)
+        
         js_code = "".join([s.text for s in soup.find_all('script')])
         res['V6_JS_Entropy'] = get_entropy(js_code)
+        
         words, sentences = full_text.split(), re.split(r'[.!?]+', full_text)
         res['V7_Text_Readability_Score'] = np.clip(len(words)/(len(sentences) or 1) / 20.0, 0, 1)
+        
         iframes = soup.find_all('iframe')
-        res['V8_Total_IFrames'], res['V9_Has_Hidden_IFrame'] = len(iframes), (1 if any('none' in str(f.get('style','')).lower() for f in iframes) else 0)
+        res['V8_Total_IFrames'] = len(iframes)
+        res['V9_Has_Hidden_IFrame'] = 1 if any('none' in str(f.get('style','')).lower() for f in iframes) else 0
         res['V11_WHOIS_Extraction_Success'] = 1
     except:
-        res['Alarm_System_Error'] = 1
         res['V10_HTTP_Extraction_Success'] = 0
         res['V1_PHash_Distance'] = 0.5 
     return res
@@ -148,10 +151,9 @@ def main():
     # Đọc file dataset gốc
     df_raw = pd.read_csv(RAW_CSV_FILE, usecols=OLD_KEEP_COLS)
     
-    # Checkpoint thông minh: Tự dọn dòng lỗi và dòng trống
+    # Checkpoint: Đọc những URL đã xử lý từ file checkpoint 15 cột
     if os.path.exists(TEMP_LOG_FILE):
-        print("🔄 Đang quét file checkpoint (có thể mất 1-2 phút)...")
-        # on_bad_lines='skip' giúp bỏ qua các dòng lỗi do sập ổ cứng
+        print("🔄 Đang quét file checkpoint...")
         check_df = pd.read_csv(TEMP_LOG_FILE, usecols=['URL_KEY'], on_bad_lines='skip').dropna()
         processed_urls = set(check_df['URL_KEY'].astype(str))
     else:
@@ -161,7 +163,7 @@ def main():
     total_todo = len(df_todo)
     
     if total_todo == 0:
-        print("✅ Toàn bộ 235,795 URL đã được xử lý hoàn tất!"); return
+        print("✅ Toàn bộ URL đã được xử lý hoàn tất!"); return
 
     print(f"🚀 Tiếp tục từ: {len(processed_urls)} | Còn lại: {total_todo} URL")
     chunks = [df_todo[i:i + CHUNK_SIZE] for i in range(0, total_todo, CHUNK_SIZE)]
@@ -177,7 +179,6 @@ def main():
                         f.flush()
                         os.fsync(f.fileno())
                 
-                # Sau mỗi 10 đợt, dọn RAM và các tiến trình Chrome "ma"
                 if i % 10 == 0:
                     clear_linux_cache()
                     os.system('pkill -f chromium > /dev/null 2>&1')
@@ -190,7 +191,7 @@ def main():
                 print(f"➜ [{datetime.now().strftime('%H:%M:%S')}] {len(processed_urls)+done}/{len(df_raw)} "
                       f"| {speed:.1f} URL/s | Còn: {str(timedelta(seconds=int(remaining_sec)))}")
             except Exception as e:
-                print(f"⚠️ Một batch gặp lỗi nhẹ và đã được bỏ qua để chạy tiếp: {e}")
+                print(f"⚠️ Batch lỗi: {e}")
 
     # Gộp file cuối cùng
     print("\n🔄 Đang tiến hành gộp dữ liệu cuối cùng vào file Full...")
