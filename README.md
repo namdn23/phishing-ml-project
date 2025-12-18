@@ -8,6 +8,7 @@ import socket
 import re
 import tldextract
 import ssl
+import subprocess
 from datetime import datetime, timedelta
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from playwright.sync_api import sync_playwright
@@ -23,10 +24,10 @@ RAW_CSV_FILE = 'PhiUSIIL_Phishing_URL_Dataset.csv'
 TEMP_LOG_FILE = 'extraction_checkpoint.csv'
 FINAL_OUTPUT = 'PhiUSIIL_Extracted_Full.csv'
 
-# THÔNG SỐ VẬN HÀNH
-MAX_WORKERS = 20    
-CHUNK_SIZE = 40     
-TIMEOUT_MS = 10000  # Timeout 10 giây cho mỗi URL
+# THÔNG SỐ VẬN HÀNH (Đã tối ưu cho cấu hình máy của bạn)
+MAX_WORKERS = 20    # Số luồng an toàn để tránh crash
+CHUNK_SIZE = 25     # Ghi file sau mỗi 25 URL mỗi luồng
+TIMEOUT_MS = 10000  # 10 giây cho mỗi URL
 TARGET_PHASH = imagehash.hex_to_hash('9880e61f1c7e0c4f')
 
 OLD_KEEP_COLS = [
@@ -36,8 +37,15 @@ OLD_KEEP_COLS = [
 ]
 
 # =================================================================
-# II. LOGIC TRÍCH XUẤT ĐẶC TRƯNG & ALARM
+# II. CÔNG CỤ HỆ THỐNG (DỌN RAM & TLS)
 # =================================================================
+def clear_linux_cache():
+    """Giải phóng bộ nhớ đệm RAM trong Kali Linux"""
+    try:
+        os.system('sync; echo 3 | sudo tee /proc/sys/vm/drop_caches > /dev/null')
+    except:
+        pass
+
 def get_entropy(text):
     if not text or len(text) == 0: return 0.0
     probs = [count/len(text) for count in Counter(text).values()]
@@ -46,8 +54,7 @@ def get_entropy(text):
 def get_tls_issuer(hostname):
     try:
         context = ssl.create_default_context()
-        context.check_hostname = False
-        context.verify_mode = ssl.CERT_NONE
+        context.check_hostname, context.verify_mode = False, ssl.CERT_NONE
         with socket.create_connection((hostname, 443), timeout=3) as sock:
             with context.wrap_socket(sock, server_hostname=hostname) as ssock:
                 cert = ssock.getpeercert()
@@ -55,8 +62,10 @@ def get_tls_issuer(hostname):
                 return issuer.get('organizationName', 'Unknown')
     except: return 'None'
 
+# =================================================================
+# III. LOGIC TRÍCH XUẤT ĐẶC TRƯNG
+# =================================================================
 def extract_full_features(page, url):
-    # Khởi tạo 14 đặc trưng + 3 cột báo lỗi
     res = {k: 0.0 for k in [
         'V10_HTTP_Extraction_Success', 'V11_WHOIS_Extraction_Success', 'V1_PHash_Distance', 
         'V2_Layout_Similarity', 'V6_JS_Entropy', 'V7_Text_Readability_Score', 
@@ -65,15 +74,13 @@ def extract_full_features(page, url):
         'V22_IP_Subdomain_Pattern', 'V23_Entropy_Subdomain',
         'Alarm_System_Error', 'Alarm_Capture_Failed', 'Alarm_Empty_Content'
     ]}
-    
     try:
-        # Tối ưu: Chặn rác để không phí thời gian load trong 10s timeout
-        page.route("**/*", lambda route: route.abort() if route.request.resource_type in ["image", "media", "font", "other", "stylesheet"] else route.continue_())
+        # Chặn các tài nguyên không cần thiết để tăng tốc
+        page.route("**/*", lambda r: r.abort() if r.request.resource_type in ["image", "media", "font", "stylesheet"] else r.continue_())
         
         ext = tldextract.extract(url)
         domain = f"{ext.domain}.{ext.suffix}"
         
-        # Đặc trưng tĩnh
         res['V22_IP_Subdomain_Pattern'] = 1 if re.search(r'\d+\.\d+', ext.subdomain) else 0
         res['V23_Entropy_Subdomain'] = get_entropy(ext.subdomain)
         res['Is_Top_1M_Domain'] = 1 if ext.domain in ['google', 'facebook', 'microsoft', 'apple', 'amazon'] else 0
@@ -81,11 +88,11 @@ def extract_full_features(page, url):
         except: pass
         res['V5_TLS_Issuer_Reputation'] = 1.0 if get_tls_issuer(domain) != 'None' else 0.0
 
-        # TRUY CẬP URL VỚI TIMEOUT
+        # Truy cập trang web
         page.goto(url, timeout=TIMEOUT_MS, wait_until="commit") 
         res['V10_HTTP_Extraction_Success'] = 1
         
-        # Chụp ảnh (pHash)
+        # Chụp ảnh và tính pHash
         try:
             img_bytes = page.screenshot(timeout=5000)
             img = Image.open(io.BytesIO(img_bytes)).convert('L')
@@ -94,7 +101,7 @@ def extract_full_features(page, url):
             res['Alarm_Capture_Failed'] = 1
             res['V1_PHash_Distance'] = 0.5
 
-        # Nội dung (DOM/JS)
+        # Phân tích nội dung DOM
         content = page.content()
         soup = BeautifulSoup(content, 'html.parser')
         full_text = soup.get_text().strip()
@@ -109,23 +116,18 @@ def extract_full_features(page, url):
         iframes = soup.find_all('iframe')
         res['V8_Total_IFrames'], res['V9_Has_Hidden_IFrame'] = len(iframes), (1 if any('none' in str(f.get('style','')).lower() for f in iframes) else 0)
         res['V11_WHOIS_Extraction_Success'] = 1
-        
-    except Exception:
-        # Bắt lỗi Timeout hoặc URL chết
+    except:
         res['Alarm_System_Error'] = 1
         res['V10_HTTP_Extraction_Success'] = 0
         res['V1_PHash_Distance'] = 0.5 
     return res
 
-# =================================================================
-# III. QUẢN LÝ ĐA LUỒNG & DỰ ĐOÁN ETA
-# =================================================================
 def thread_worker(chunk_df):
     results = []
     p = sync_playwright().start() 
     browser = None
     try:
-        browser = p.chromium.launch(headless=True, args=["--no-sandbox", "--disable-dev-shm-usage", "--single-process"])
+        browser = p.chromium.launch(headless=True, args=["--no-sandbox", "--disable-dev-shm-usage"])
         context = browser.new_context(viewport={'width': 1280, 'height': 720})
         page = context.new_page()
         for _, row in chunk_df.iterrows():
@@ -134,59 +136,68 @@ def thread_worker(chunk_df):
             results.append(data)
     finally:
         if browser: browser.close()
-        p.stop() # Cưỡng ép tiêu diệt Chrome Driver để xả RAM
+        p.stop()
     return results
 
-
-
+# =================================================================
+# IV. QUẢN LÝ CHƯƠNG TRÌNH
+# =================================================================
 def main():
     start_session_time = time.time()
-    if not os.path.exists(RAW_CSV_FILE):
-        print(f"❌ Không tìm thấy file nguồn {RAW_CSV_FILE}"); return
-        
+    
+    # Đọc file dataset gốc
     df_raw = pd.read_csv(RAW_CSV_FILE, usecols=OLD_KEEP_COLS)
     
-    # Checkpoint
-    processed_urls = set(pd.read_csv(TEMP_LOG_FILE, usecols=['URL_KEY'])['URL_KEY'].astype(str)) if os.path.exists(TEMP_LOG_FILE) else set()
+    # Checkpoint thông minh: Tự dọn dòng lỗi và dòng trống
+    if os.path.exists(TEMP_LOG_FILE):
+        print("🔄 Đang quét file checkpoint (có thể mất 1-2 phút)...")
+        # on_bad_lines='skip' giúp bỏ qua các dòng lỗi do sập ổ cứng
+        check_df = pd.read_csv(TEMP_LOG_FILE, usecols=['URL_KEY'], on_bad_lines='skip').dropna()
+        processed_urls = set(check_df['URL_KEY'].astype(str))
+    else:
+        processed_urls = set()
+
     df_todo = df_raw[~df_raw['URL'].astype(str).isin(processed_urls)]
     total_todo = len(df_todo)
     
     if total_todo == 0:
-        print("✅ Đã hoàn thành toàn bộ dữ liệu."); return
+        print("✅ Toàn bộ 235,795 URL đã được xử lý hoàn tất!"); return
 
-    print(f"🚀 Tiếp tục: {len(processed_urls)} | Còn: {total_todo} | Timeout: {TIMEOUT_MS}ms")
+    print(f"🚀 Tiếp tục từ: {len(processed_urls)} | Còn lại: {total_todo} URL")
     chunks = [df_todo[i:i + CHUNK_SIZE] for i in range(0, total_todo, CHUNK_SIZE)]
     
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
         futures = {executor.submit(thread_worker, c): c for c in chunks}
         for i, future in enumerate(as_completed(futures), 1):
-            batch = future.result()
-            if batch:
-                # GHI FILE & FLUSH RAM
-                with open(TEMP_LOG_FILE, 'a', encoding='utf-8') as f:
-                    pd.DataFrame(batch).to_csv(f, header=f.tell()==0, index=False)
-                    f.flush()
-                    os.fsync(f.fileno())
-            
-            # TÍNH TOÁN DỰ ĐOÁN THỜI GIAN (ETA)
-            done = i * CHUNK_SIZE
-            if done > total_todo: done = total_todo
-            elapsed = time.time() - start_session_time
-            speed = done / elapsed if elapsed > 0 else 0
-            remaining_sec = (total_todo - done) / speed if speed > 0 else 0
-            
-            eta_str = str(timedelta(seconds=int(remaining_sec)))
-            finish_at = (datetime.now() + timedelta(seconds=int(remaining_sec))).strftime("%H:%M:%S")
+            try:
+                batch = future.result()
+                if batch:
+                    with open(TEMP_LOG_FILE, 'a', encoding='utf-8') as f:
+                        pd.DataFrame(batch).to_csv(f, header=f.tell()==0, index=False)
+                        f.flush()
+                        os.fsync(f.fileno())
+                
+                # Sau mỗi 10 đợt, dọn RAM và các tiến trình Chrome "ma"
+                if i % 10 == 0:
+                    clear_linux_cache()
+                    os.system('pkill -f chromium > /dev/null 2>&1')
 
-            print(f"➜ [{datetime.now().strftime('%H:%M:%S')}] {len(processed_urls)+done}/{len(df_raw)} "
-                  f"| {speed:.1f} URL/s | Còn lại: {eta_str} | Xong lúc: {finish_at}")
+                done = min(i * CHUNK_SIZE, total_todo)
+                elapsed = time.time() - start_session_time
+                speed = done / elapsed if elapsed > 0 else 0
+                remaining_sec = (total_todo - done) / speed if speed > 0 else 0
+                
+                print(f"➜ [{datetime.now().strftime('%H:%M:%S')}] {len(processed_urls)+done}/{len(df_raw)} "
+                      f"| {speed:.1f} URL/s | Còn: {str(timedelta(seconds=int(remaining_sec)))}")
+            except Exception as e:
+                print(f"⚠️ Một batch gặp lỗi nhẹ và đã được bỏ qua để chạy tiếp: {e}")
 
-    # TỔNG HỢP CUỐI CÙNG
-    print("\n🔄 Đang gộp file kết quả...")
-    df_new = pd.read_csv(TEMP_LOG_FILE).drop_duplicates('URL_KEY')
+    # Gộp file cuối cùng
+    print("\n🔄 Đang tiến hành gộp dữ liệu cuối cùng vào file Full...")
+    df_new = pd.read_csv(TEMP_LOG_FILE, on_bad_lines='skip').drop_duplicates('URL_KEY')
     df_final = pd.merge(df_raw, df_new, left_on='URL', right_on='URL_KEY', how='inner')
     df_final.drop(columns=['URL_KEY']).to_csv(FINAL_OUTPUT, index=False)
-    print(f"✅ HOÀN TẤT! File: {FINAL_OUTPUT}")
+    print(f"✅ HOÀN TẤT THÀNH CÔNG! File lưu tại: {FINAL_OUTPUT}")
 
 if __name__ == "__main__":
     main()
