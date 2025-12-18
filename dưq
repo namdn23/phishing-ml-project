@@ -4,3 +4,6 @@ sed -i 's/ ,/,/g' extraction_checkpoint.csv
 # Kiểm tra lại 5 dòng đầu xem đã sát nhau chưa
 head -n 5 extraction_checkpoint.csv
 V10_HTTP_Extraction_Success,V11_WHOIS_Extraction_Success,V1_PHash_Distance,V2_Layout_Similarity,V6_JS_Entropy,V7_Text_Readability_Score,V8_Total_IFrames,V9_Has_Hidden_IFrame,V5_TLS_Issuer_Reputation,V3_Domain_Age_Days,V4_DNS_Volatility_Count,Is_Top_1M_Domain,V22_IP_Subdomain_Pattern,V23_Entropy_Subdomain,URL_KEY,Alarm_System_Error,Alarm_Capture_Failed,Alarm_Empty_Content
+
+
+sed -i '1s/.*/V10_HTTP_Extraction_Success,V11_WHOIS_Extraction_Success,V1_PHash_Distance,V2_Layout_Similarity,V6_JS_Entropy,V7_Text_Readability_Score,V8_Total_IFrames,V9_Has_Hidden_IFrame,V5_TLS_Issuer_Reputation,V3_Domain_Age_Days,V4_DNS_Volatility_Count,Is_Top_1M_Domain,V22_IP_Subdomain_Pattern,V23_Entropy_Subdomain,Alarm_System_Error,Alarm_Capture_Failed,Alarm_Empty_Content,URL_KEY/' extraction_checkpoint.csv
