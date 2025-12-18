@@ -62,4 +62,44 @@ df_cleaned.to_csv(fname, index=False)
 print('✅ Đã xóa 3 cột Alarm thành công!')
 print('Cấu trúc mới:', df_cleaned.columns.tolist())
 "
-                                                                                                                
+
+
+
+python3 -c "
+import pandas as pd
+
+fname = 'extraction_checkpoint.csv'
+expected_cols = 15  # 14 đặc trưng + 1 URL_KEY
+
+print(f'--- Đang kiểm tra file: {fname} ---')
+
+try:
+    # Đọc file bằng cách đếm dấu phẩy thủ công để tìm dòng lệch
+    with open(fname, 'r', encoding='utf-8') as f:
+        lines = f.readlines()
+    
+    header = lines[0].strip().split(',')
+    print(f'Số cột trong header: {len(header)}')
+    
+    errors = 0
+    for i, line in enumerate(lines[1:], 1):
+        parts = line.strip().split(',')
+        # Kiểm tra số lượng cột
+        if len(parts) != len(header):
+            print(f'❌ Dòng {i+1} bị lệch: Có {len(parts)} cột (Mong đợi {len(header)})')
+            print(f'   Nội dung: {line[:100]}...')
+            errors += 1
+        
+        # Kiểm tra xem URL_KEY có bị trống không
+        elif not parts[-1].startswith('http'):
+            print(f'⚠️ Dòng {i+1} có vẻ sai URL_KEY: {parts[-1]}')
+            errors += 1
+
+    if errors == 0:
+        print('✅ Tuyệt vời! Tất cả các dòng đều khớp cấu trúc cột.')
+    else:
+        print(f'--- Tổng cộng có {errors} dòng lỗi ---')
+
+except Exception as e:
+    print(f'❌ Lỗi khi đọc file: {e}')
+"
