@@ -8,7 +8,6 @@ import socket
 import re
 import tldextract
 import ssl
-import subprocess
 from datetime import datetime, timedelta
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from playwright.sync_api import sync_playwright
@@ -24,10 +23,10 @@ RAW_CSV_FILE = 'PhiUSIIL_Phishing_URL_Dataset.csv'
 TEMP_LOG_FILE = 'extraction_checkpoint.csv'
 FINAL_OUTPUT = 'PhiUSIIL_Extracted_Full.csv'
 
-# THÔNG SỐ VẬN HÀNH
-MAX_WORKERS = 20    # Số luồng xử lý song song
+# THÔNG SỐ VẬN HÀNH TỐI ƯU
+MAX_WORKERS = 15    # 15 luồng để ổn định CPU trên Kali
 CHUNK_SIZE = 25     # Ghi file sau mỗi 25 URL mỗi luồng
-TIMEOUT_MS = 10000  # 10 giây cho mỗi URL
+TIMEOUT_MS = 12000  # 12 giây cho mỗi URL
 TARGET_PHASH = imagehash.hex_to_hash('9880e61f1c7e0c4f')
 
 OLD_KEEP_COLS = [
@@ -40,11 +39,8 @@ OLD_KEEP_COLS = [
 # II. CÔNG CỤ HỆ THỐNG
 # =================================================================
 def clear_linux_cache():
-    """Giải phóng bộ nhớ đệm RAM trong Kali Linux"""
-    try:
-        os.system('sync; echo 3 | sudo tee /proc/sys/vm/drop_caches > /dev/null')
-    except:
-        pass
+    try: os.system('sync; echo 3 | sudo tee /proc/sys/vm/drop_caches > /dev/null')
+    except: pass
 
 def get_entropy(text):
     if not text or len(text) == 0: return 0.0
@@ -63,10 +59,9 @@ def get_tls_issuer(hostname):
     except: return 'None'
 
 # =================================================================
-# III. LOGIC TRÍCH XUẤT ĐẶC TRƯNG (ĐÃ BỎ ALARM)
+# III. LOGIC TRÍCH XUẤT SIÊU TỐC (GIỮ NGUYÊN ĐẶC TRƯNG)
 # =================================================================
 def extract_full_features(page, url):
-    # Khởi tạo 14 đặc trưng kỹ thuật
     res = {k: 0.0 for k in [
         'V10_HTTP_Extraction_Success', 'V11_WHOIS_Extraction_Success', 'V1_PHash_Distance', 
         'V2_Layout_Similarity', 'V6_JS_Entropy', 'V7_Text_Readability_Score', 
@@ -74,42 +69,48 @@ def extract_full_features(page, url):
         'V3_Domain_Age_Days', 'V4_DNS_Volatility_Count', 'Is_Top_1M_Domain', 
         'V22_IP_Subdomain_Pattern', 'V23_Entropy_Subdomain'
     ]}
+
+    # Handler chặn tài nguyên để tăng tốc nhưng không làm hỏng DOM
+    def block_resources(route):
+        try:
+            if route.request.resource_type in ["image", "media", "font", "stylesheet", "other"]:
+                route.abort()
+            else:
+                route.continue_()
+        except: pass
+
     try:
-        # Chặn các tài nguyên nặng để tăng tốc
-        page.route("**/*", lambda r: r.abort() if r.request.resource_type in ["image", "media", "font", "stylesheet"] else r.continue_())
+        page.route("**/*", block_resources)
         
         ext = tldextract.extract(url)
         domain = f"{ext.domain}.{ext.suffix}"
-        
         res['V22_IP_Subdomain_Pattern'] = 1 if re.search(r'\d+\.\d+', ext.subdomain) else 0
         res['V23_Entropy_Subdomain'] = get_entropy(ext.subdomain)
         res['Is_Top_1M_Domain'] = 1 if ext.domain in ['google', 'facebook', 'microsoft', 'apple', 'amazon'] else 0
         
         try: res['V4_DNS_Volatility_Count'] = len(socket.gethostbyname_ex(domain)[2])
         except: pass
-        
         res['V5_TLS_Issuer_Reputation'] = 1.0 if get_tls_issuer(domain) != 'None' else 0.0
 
-        # Truy cập trang web
+        # Mở trang
         page.goto(url, timeout=TIMEOUT_MS, wait_until="commit") 
         res['V10_HTTP_Extraction_Success'] = 1
         
-        # Chụp ảnh và tính pHash (Lỗi thì mặc định 0.5)
+        # pHash - Tính trên layout (vẫn đảm bảo đặc trưng cấu trúc)
         try:
-            img_bytes = page.screenshot(timeout=3000)
+            img_bytes = page.screenshot(timeout=4000)
             img = Image.open(io.BytesIO(img_bytes)).convert('L')
             res['V1_PHash_Distance'] = (imagehash.phash(img) - TARGET_PHASH) / 64.0
         except:
             res['V1_PHash_Distance'] = 0.5
 
-        # Phân tích nội dung DOM
+        # Phân tích nội dung (Dùng lxml để cực nhanh)
         content = page.content()
-        soup = BeautifulSoup(content, 'html.parser')
+        soup = BeautifulSoup(content, 'lxml') 
         full_text = soup.get_text().strip()
-
+        
         depths = [len(list(t.parents)) for t in soup.find_all(True)]
         res['V2_Layout_Similarity'] = np.clip(1.0 - (max(depths or [0])/40.0), 0, 1)
-        
         js_code = "".join([s.text for s in soup.find_all('script')])
         res['V6_JS_Entropy'] = get_entropy(js_code)
         
@@ -127,9 +128,7 @@ def extract_full_features(page, url):
 
 def thread_worker(chunk_df):
     results = []
-    p = sync_playwright().start() 
-    browser = None
-    try:
+    with sync_playwright() as p:
         browser = p.chromium.launch(headless=True, args=["--no-sandbox", "--disable-dev-shm-usage"])
         context = browser.new_context(viewport={'width': 1280, 'height': 720})
         page = context.new_page()
@@ -137,23 +136,18 @@ def thread_worker(chunk_df):
             data = extract_full_features(page, row['URL'])
             data['URL_KEY'] = str(row['URL'])
             results.append(data)
-    finally:
-        if browser: browser.close()
-        p.stop()
+        browser.close()
     return results
 
 # =================================================================
-# IV. QUẢN LÝ CHƯƠNG TRÌNH
+# IV. QUẢN LÝ TIẾN TRÌNH
 # =================================================================
 def main():
     start_session_time = time.time()
-    
-    # Đọc file dataset gốc
     df_raw = pd.read_csv(RAW_CSV_FILE, usecols=OLD_KEEP_COLS)
     
-    # Checkpoint: Đọc những URL đã xử lý từ file checkpoint 15 cột
     if os.path.exists(TEMP_LOG_FILE):
-        print("🔄 Đang quét file checkpoint...")
+        print("🔄 Đang quét checkpoint...")
         check_df = pd.read_csv(TEMP_LOG_FILE, usecols=['URL_KEY'], on_bad_lines='skip').dropna()
         processed_urls = set(check_df['URL_KEY'].astype(str))
     else:
@@ -163,9 +157,9 @@ def main():
     total_todo = len(df_todo)
     
     if total_todo == 0:
-        print("✅ Toàn bộ URL đã được xử lý hoàn tất!"); return
+        print("✅ Đã xử lý xong toàn bộ!"); return
 
-    print(f"🚀 Tiếp tục từ: {len(processed_urls)} | Còn lại: {total_todo} URL")
+    print(f"🚀 Chạy tiếp: {len(processed_urls)} | Còn lại: {total_todo} URL")
     chunks = [df_todo[i:i + CHUNK_SIZE] for i in range(0, total_todo, CHUNK_SIZE)]
     
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
@@ -176,29 +170,26 @@ def main():
                 if batch:
                     with open(TEMP_LOG_FILE, 'a', encoding='utf-8') as f:
                         pd.DataFrame(batch).to_csv(f, header=f.tell()==0, index=False)
-                        f.flush()
-                        os.fsync(f.fileno())
                 
-                if i % 10 == 0:
+                if i % 20 == 0: # Dọn RAM sau mỗi 20 batch
                     clear_linux_cache()
-                    os.system('pkill -f chromium > /dev/null 2>&1')
+                    os.system('pkill -f chromium')
 
                 done = min(i * CHUNK_SIZE, total_todo)
                 elapsed = time.time() - start_session_time
                 speed = done / elapsed if elapsed > 0 else 0
-                remaining_sec = (total_todo - done) / speed if speed > 0 else 0
+                rem_sec = (total_todo - done) / speed if speed > 0 else 0
                 
                 print(f"➜ [{datetime.now().strftime('%H:%M:%S')}] {len(processed_urls)+done}/{len(df_raw)} "
-                      f"| {speed:.1f} URL/s | Còn: {str(timedelta(seconds=int(remaining_sec)))}")
-            except Exception as e:
-                print(f"⚠️ Batch lỗi: {e}")
+                      f"| {speed:.1f} URL/s | Còn: {str(timedelta(seconds=int(rem_sec)))}")
+            except Exception: pass
 
-    # Gộp file cuối cùng
-    print("\n🔄 Đang tiến hành gộp dữ liệu cuối cùng vào file Full...")
+    # Gộp dữ liệu lần cuối
+    print("\n🔄 Đang tiến hành gộp dữ liệu...")
     df_new = pd.read_csv(TEMP_LOG_FILE, on_bad_lines='skip').drop_duplicates('URL_KEY')
     df_final = pd.merge(df_raw, df_new, left_on='URL', right_on='URL_KEY', how='inner')
     df_final.drop(columns=['URL_KEY']).to_csv(FINAL_OUTPUT, index=False)
-    print(f"✅ HOÀN TẤT THÀNH CÔNG! File lưu tại: {FINAL_OUTPUT}")
+    print(f"✅ HOÀN TẤT! File lưu tại: {FINAL_OUTPUT}")
 
 if __name__ == "__main__":
     main()
