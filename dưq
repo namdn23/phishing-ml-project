@@ -105,3 +105,11 @@ except Exception as e:
 "
 
 https://www.intuition.com
+python3 -c "
+import pandas as pd
+fname = 'extraction_checkpoint.csv'
+# on_bad_lines='skip' sẽ tự động xóa các dòng bị thừa/thiếu cột
+df = pd.read_csv(fname, on_bad_lines='skip')
+df.to_csv(fname, index=False)
+print('✅ Đã dọn dẹp và xóa bỏ các dòng lỗi cấu trúc!')
+"
