@@ -23,10 +23,10 @@ RAW_CSV_FILE = 'PhiUSIIL_Phishing_URL_Dataset.csv'
 TEMP_LOG_FILE = 'extraction_checkpoint.csv'
 FINAL_OUTPUT = 'PhiUSIIL_Extracted_Full.csv'
 
-# THÔNG SỐ VẬN HÀNH TỐI ƯU
-MAX_WORKERS = 15    # 15 luồng để ổn định CPU trên Kali
-CHUNK_SIZE = 25     # Ghi file sau mỗi 25 URL mỗi luồng
-TIMEOUT_MS = 12000  # 12 giây cho mỗi URL
+# Tối ưu cho độ chính xác và chống chặn
+MAX_WORKERS = 15    
+CHUNK_SIZE = 40     
+TIMEOUT_MS = 15000  # 15 giây để trang kịp load khi có bảo mật
 TARGET_PHASH = imagehash.hex_to_hash('9880e61f1c7e0c4f')
 
 OLD_KEEP_COLS = [
@@ -59,9 +59,9 @@ def get_tls_issuer(hostname):
     except: return 'None'
 
 # =================================================================
-# III. LOGIC TRÍCH XUẤT SIÊU TỐC (GIỮ NGUYÊN ĐẶC TRƯNG)
+# III. LOGIC TRÍCH XUẤT CHỐNG CHẶN (ADAPTIVE RETRY)
 # =================================================================
-def extract_full_features(page, url):
+def extract_full_features(page, url, retry_count=0):
     res = {k: 0.0 for k in [
         'V10_HTTP_Extraction_Success', 'V11_WHOIS_Extraction_Success', 'V1_PHash_Distance', 
         'V2_Layout_Similarity', 'V6_JS_Entropy', 'V7_Text_Readability_Score', 
@@ -70,10 +70,12 @@ def extract_full_features(page, url):
         'V22_IP_Subdomain_Pattern', 'V23_Entropy_Subdomain'
     ]}
 
-    # Handler chặn tài nguyên để tăng tốc nhưng không làm hỏng DOM
+    # Handler chặn rác để tăng tốc
     def block_resources(route):
         try:
-            if route.request.resource_type in ["image", "media", "font", "stylesheet", "other"]:
+            # Nếu là lần thử lại (retry), cho phép tải CSS để vượt qua check-bot sâu
+            bad_types = ["image", "media", "font"] if retry_count > 0 else ["image", "media", "font", "stylesheet"]
+            if route.request.resource_type in bad_types:
                 route.abort()
             else:
                 route.continue_()
@@ -82,6 +84,7 @@ def extract_full_features(page, url):
     try:
         page.route("**/*", block_resources)
         
+        # Đặc trưng Domain (Không cần mạng)
         ext = tldextract.extract(url)
         domain = f"{ext.domain}.{ext.suffix}"
         res['V22_IP_Subdomain_Pattern'] = 1 if re.search(r'\d+\.\d+', ext.subdomain) else 0
@@ -92,36 +95,46 @@ def extract_full_features(page, url):
         except: pass
         res['V5_TLS_Issuer_Reputation'] = 1.0 if get_tls_issuer(domain) != 'None' else 0.0
 
-        # Mở trang
-        page.goto(url, timeout=TIMEOUT_MS, wait_until="commit") 
+        # Truy cập trang với cơ chế giả lập người dùng
+        response = page.goto(url, timeout=TIMEOUT_MS, wait_until="load")
+        
+        # Kiểm tra nếu bị chặn bởi Cloudflare hoặc lỗi server
+        if not response or response.status in [403, 503, 429]:
+            raise Exception("Blocked")
+
         res['V10_HTTP_Extraction_Success'] = 1
         
-        # pHash - Tính trên layout (vẫn đảm bảo đặc trưng cấu trúc)
+        # Chụp ảnh tính pHash
         try:
-            img_bytes = page.screenshot(timeout=4000)
+            img_bytes = page.screenshot(timeout=5000)
             img = Image.open(io.BytesIO(img_bytes)).convert('L')
             res['V1_PHash_Distance'] = (imagehash.phash(img) - TARGET_PHASH) / 64.0
         except:
             res['V1_PHash_Distance'] = 0.5
 
-        # Phân tích nội dung (Dùng lxml để cực nhanh)
+        # BeautifulSoup xử lý nội dung
         content = page.content()
         soup = BeautifulSoup(content, 'lxml') 
-        full_text = soup.get_text().strip()
+        text_content = soup.get_text()
         
         depths = [len(list(t.parents)) for t in soup.find_all(True)]
         res['V2_Layout_Similarity'] = np.clip(1.0 - (max(depths or [0])/40.0), 0, 1)
-        js_code = "".join([s.text for s in soup.find_all('script')])
-        res['V6_JS_Entropy'] = get_entropy(js_code)
+        res['V6_JS_Entropy'] = get_entropy("".join([s.text for s in soup.find_all('script')]))
         
-        words, sentences = full_text.split(), re.split(r'[.!?]+', full_text)
-        res['V7_Text_Readability_Score'] = np.clip(len(words)/(len(sentences) or 1) / 20.0, 0, 1)
+        words, sents = text_content.split(), re.split(r'[.!?]+', text_content)
+        res['V7_Text_Readability_Score'] = np.clip(len(words)/(len(sents) or 1) / 20.0, 0, 1)
         
         iframes = soup.find_all('iframe')
         res['V8_Total_IFrames'] = len(iframes)
         res['V9_Has_Hidden_IFrame'] = 1 if any('none' in str(f.get('style','')).lower() for f in iframes) else 0
         res['V11_WHOIS_Extraction_Success'] = 1
-    except:
+
+    except Exception:
+        # Nếu bị lỗi/chặn và chưa retry, tiến hành thử lại 1 lần duy nhất
+        if retry_count < 1:
+            time.sleep(2) # Nghỉ 2s trước khi thử lại
+            return extract_full_features(page, url, retry_count=1)
+        
         res['V10_HTTP_Extraction_Success'] = 0
         res['V1_PHash_Distance'] = 0.5 
     return res
@@ -129,8 +142,16 @@ def extract_full_features(page, url):
 def thread_worker(chunk_df):
     results = []
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True, args=["--no-sandbox", "--disable-dev-shm-usage"])
-        context = browser.new_context(viewport={'width': 1280, 'height': 720})
+        # Khởi chạy với chế độ ẩn danh và giả lập người dùng
+        browser = p.chromium.launch(headless=True, args=[
+            "--no-sandbox", 
+            "--disable-dev-shm-usage",
+            "--disable-blink-features=AutomationControlled"
+        ])
+        context = browser.new_context(
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            viewport={'width': 1280, 'height': 720}
+        )
         page = context.new_page()
         for _, row in chunk_df.iterrows():
             data = extract_full_features(page, row['URL'])
@@ -157,9 +178,9 @@ def main():
     total_todo = len(df_todo)
     
     if total_todo == 0:
-        print("✅ Đã xử lý xong toàn bộ!"); return
+        print("✅ Hoàn tất 100%!"); return
 
-    print(f"🚀 Chạy tiếp: {len(processed_urls)} | Còn lại: {total_todo} URL")
+    print(f"🚀 STEALTH MODE ON | Workers: {MAX_WORKERS} | Còn lại: {total_todo}")
     chunks = [df_todo[i:i + CHUNK_SIZE] for i in range(0, total_todo, CHUNK_SIZE)]
     
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
@@ -171,7 +192,7 @@ def main():
                     with open(TEMP_LOG_FILE, 'a', encoding='utf-8') as f:
                         pd.DataFrame(batch).to_csv(f, header=f.tell()==0, index=False)
                 
-                if i % 20 == 0: # Dọn RAM sau mỗi 20 batch
+                if i % 10 == 0: 
                     clear_linux_cache()
                     os.system('pkill -f chromium')
 
@@ -181,15 +202,14 @@ def main():
                 rem_sec = (total_todo - done) / speed if speed > 0 else 0
                 
                 print(f"➜ [{datetime.now().strftime('%H:%M:%S')}] {len(processed_urls)+done}/{len(df_raw)} "
-                      f"| {speed:.1f} URL/s | Còn: {str(timedelta(seconds=int(rem_sec)))}")
+                      f"| {speed:.2f} URL/s | Còn: {str(timedelta(seconds=int(rem_sec)))}")
             except Exception: pass
 
-    # Gộp dữ liệu lần cuối
-    print("\n🔄 Đang tiến hành gộp dữ liệu...")
+    print("\n🔄 Đang hoàn thiện file tổng hợp...")
     df_new = pd.read_csv(TEMP_LOG_FILE, on_bad_lines='skip').drop_duplicates('URL_KEY')
     df_final = pd.merge(df_raw, df_new, left_on='URL', right_on='URL_KEY', how='inner')
     df_final.drop(columns=['URL_KEY']).to_csv(FINAL_OUTPUT, index=False)
-    print(f"✅ HOÀN TẤT! File lưu tại: {FINAL_OUTPUT}")
+    print(f"✅ XONG! Kết quả tại: {FINAL_OUTPUT}")
 
 if __name__ == "__main__":
     main()
