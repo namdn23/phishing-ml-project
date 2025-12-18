@@ -7,3 +7,19 @@ V10_HTTP_Extraction_Success,V11_WHOIS_Extraction_Success,V1_PHash_Distance,V2_La
 
 
 sed -i '1s/.*/V10_HTTP_Extraction_Success,V11_WHOIS_Extraction_Success,V1_PHash_Distance,V2_Layout_Similarity,V6_JS_Entropy,V7_Text_Readability_Score,V8_Total_IFrames,V9_Has_Hidden_IFrame,V5_TLS_Issuer_Reputation,V3_Domain_Age_Days,V4_DNS_Volatility_Count,Is_Top_1M_Domain,V22_IP_Subdomain_Pattern,V23_Entropy_Subdomain,Alarm_System_Error,Alarm_Capture_Failed,Alarm_Empty_Content,URL_KEY/' extraction_checkpoint.csv
+V10_HTTP_Extraction_Success,V11_WHOIS_Extraction_Success,V1_PHash_Distance,V2_Layout_Similarity,V6_JS_Entropy,V7_Text_Readability_Score,V8_Total_IFrames,V9_Has_Hidden_IFrame,V5_TLS_Issuer_Reputation,V3_Domain_Age_Days,V4_DNS_Volatility_Count,Is_Top_1M_Domain,V22_IP_Subdomain_Pattern,V23_Entropy_Subdomain,Alarm_System_Error,Alarm_Capture_Failed,Alarm_Empty_Content,URL_KEY
+1,1.0,0.5625,0.9,0.0,0.35,0.0,0.0,0.0,0.0,0,0,0,0.34906015629507225,http://www.f0519141.xsph.ru,0,0,0
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0,0,0,-0.0,http://www.shprakserf.gq,0,0,0
+1,1.0,0.46875,0.22499999999999998,0.674461415926984,0.4767955801104972,3.0,1.0,1.0,0.0,2,0,0,-0.0,https://www.cryptocompare.com,0,0,0
+1,1.0,0.4375,0.525,0.6498451562925319,1.0,4.0,1.0,1.0,0.0,1,0,0,-0.0,https://www.diariodealmeria.es,0,0,0
+1,1.0,0.46875,0.525,0.6464079922745019,1.0,0.0,0.0,0.0,0.0,0,0,0,0.25,https://www.town.minamichita.lg.jp,0,0,0
+1,1.0,0.5,0.725,0.6277489805451804,1.0,0.0,0.0,1.0,0.0,1,0,0,-0.0,https://www.bwresearch.com,0,0,0
+1,1.0,0.5,0.65,0.6341720101952716,0.6790697674418604,4.0,0.0,1.0,0.0,1,0,0,-0.0,https://www.musicvideoproduction.guru,0,0,0
+1,1.0,0.46875,0.9,0.0,0.4142857142857143,0.0,0.0,1.0,0.0,1,0,0,0.4240934263060981,https://service-mitld.firebaseapp.com/,0,0,0
+1,1.0,0.53125,0.85,0.0,0.29166666666666663,0.0,0.0,1.0,0.0,3,0,0,0.41683489263144935,http://www.kuradox92.lima-city.de,0,0,0
+1,1.0,0.46875,0.9,0.0,0.4142857142857143,0.0,0.0,1.0,0.0,1,0,0,0.3902410118609203,https://liuy-9a930.web.app/,0,0,0
+1,1.0,0.53125,0.475,0.637342146574574,1.0,0.0,0.0,1.0,0.0,2,0,0,-0.0,https://www.landed.com,0,0,0
+1,1.0,0.5,0.825,0.0,0.45714285714285713,0.0,0.0,1.0,0.0,1,0,0,0.0,https://ipfs.io/ipfs/qmrvvyr84esa2assw9vvwupqjgsdn4c3dwkusfdwzdz3kn?clientid=noc@protocol.ai,0,0,0
+1,1.0,0.53125,0.875,0.0,0.6,0.0,0.0,1.0,0.0,2,0,0,0.35832338822861987,http://att-103731-107123.weeblysite.com/,0,0,0
+0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,1.0,0.0,1,0,0,-0.0,https://www.bikeseoul.com,0,0,0
+1,1.0,0.46875,0.9,0.0,0.4142857142857143,0.0,0.0,1.0,0.0,1,0,0,0.41524101186092033,https://hidok4f8zl.firebaseapp.com/,0,0,0
