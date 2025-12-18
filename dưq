@@ -41,4 +41,25 @@ V10_HTTP_Extraction_Success,V11_WHOIS_Extraction_Success,V1_PHash_Distance,V2_La
 0,0.0,0.5,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0,0,0,-0.0,0,0,0,http://www.shprakserf.gq
 1,1.0,0.46875,0.22499999999999998,0.674461415926984,0.4767955801104972,3.0,1.0,1.0,0.0,2,0,0,-0.0,0,0,0,https://www.cryptocompare.com
 1,1.0,0.4375,0.525,0.6498451562925319,1.0,4.0,1.0,1.0,0.0,1,0,0,-0.0,0,0,0,https://www.diariodealmeria.es
+
+
+python3 -c "
+import pandas as pd
+fname = 'extraction_checkpoint.csv'
+
+# Đọc file
+df = pd.read_csv(fname, on_bad_lines='skip')
+
+# Danh sách các cột muốn giữ (Loại bỏ các cột có chữ Alarm)
+cols_to_keep = [c for c in df.columns if 'Alarm' not in c]
+
+# Lọc và lưu lại
+df_cleaned = df[cols_to_keep]
+
+# Fix lỗi khoảng trắng nếu có và lưu đè
+df_cleaned.to_csv(fname, index=False)
+
+print('✅ Đã xóa 3 cột Alarm thành công!')
+print('Cấu trúc mới:', df_cleaned.columns.tolist())
+"
                                                                                                                 
