@@ -11,27 +11,33 @@ from urllib.parse import urlparse
 from playwright.async_api import async_playwright
 
 # =========================================================
-# 1. CẤU HÌNH HỆ THỐNG - TỐI ƯU ĐỘ ỔN ĐỊNH
+# 1. CẤU HÌNH HỆ THỐNG - TỐI ƯU ĐỂ GIẢM FAILED
 # =========================================================
 INPUT_FILE = "Dataset_Ready_to_Train.csv"
 OUTPUT_FILE = "Dataset_18_Features_Final.csv"
 LOG_FILE = "processed_urls.log"
 TOP_1M_FILE = "top-1m.csv"
 
-# Giảm xuống 15 luồng để tránh bị server chặn IP (Rate Limit)
-CONCURRENT_PAGES = 15 
-TIMEOUT = 60000 # 60 giây để chờ các server ở xa phản hồi
-MAX_RETRIES = 2 # Thử lại tối đa 2 lần nếu lỗi
+# Giảm số luồng xuống 10-15 để tránh bị tường lửa hosting chặn IP
+CONCURRENT_PAGES = 12 
+TIMEOUT = 60000 # Tăng lên 60 giây chờ đợi
+MAX_RETRIES = 2 # Thử lại nếu lỗi
 
 # =========================================================
-# 2. HÀM BỔ TRỢ & ĐẶC TRƯNG TĨNH
+# 2. XỬ LÝ LỖI IMPORT STEALTH (Sửa lỗi hình 1)
 # =========================================================
-def load_processed_urls():
-    if os.path.exists(LOG_FILE):
-        with open(LOG_FILE, 'r') as f:
-            return set(line.split('|')[0].strip() for line in f if line.strip())
-    return set()
+def apply_stealth_logic(page):
+    # Thay vì dùng thư viện lỗi, ta dùng script thủ công để xóa dấu vết bot
+    return page.add_init_script("""
+        Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
+        window.chrome = { runtime: {} };
+        Object.defineProperty(navigator, 'languages', {get: () => ['en-US', 'en']});
+        Object.defineProperty(navigator, 'plugins', {get: () => [1, 2, 3, 4, 5]});
+    """)
 
+# =========================================================
+# 3. TRÍCH XUẤT STATIC FEATURES (8 Cột)
+# =========================================================
 try:
     top_1m_set = set(pd.read_csv(TOP_1M_FILE, header=None)[1].astype(str).str.lower().values)
 except:
@@ -56,127 +62,100 @@ def extract_static(url):
         'Is_Top_1M_Domain': 1 if any(d in top_1m_set for d in [domain, '.'.join(domain.split('.')[-2:])]) else 0
     }
 
-async def intercept_route(route):
-    if route.request.resource_type in ["image", "media", "font", "stylesheet"]:
-        await route.abort()
-    else:
-        try: await route.continue_()
-        except: pass
-
 # =========================================================
-# 3. LOGIC TRÍCH XUẤT ĐỘNG - CÓ RETRY & GIẢ LẬP NGƯỜI THẬT
+# 4. DYNAMIC FEATURES - CƠ CHẾ RETRY (10 Cột)
 # =========================================================
 async def extract_task(url, label, context, semaphore, log_handle):
     static_data = extract_static(url)
-    status = "SKIP"
-    dynamic_data = {}
+    status = "FAILED"
+    dynamic_data = {f: 0.5 for f in ['Outlink_Ratio', 'HasExternalFormSubmit', 'HasPasswordField', 'DomainTitleMatchScore', 
+                                    'HasSocialNet', 'HasCopyrightInfo', 'HasDescription', 'V9_Has_Hidden_IFrame', 
+                                    'V5_TLS_Issuer_Reputation', 'V4_DNS_Volatility_Count']}
 
     if static_data['Is_Top_1M_Domain'] == 1:
-        dynamic_data = {
-            'Outlink_Ratio': 0.0, 'HasExternalFormSubmit': 0, 'HasPasswordField': 0,
-            'DomainTitleMatchScore': 1, 'HasSocialNet': 1, 'HasCopyrightInfo': 1, 'HasDescription': 1,
-            'V9_Has_Hidden_IFrame': 0, 'V5_TLS_Issuer_Reputation': 1, 'V4_DNS_Volatility_Count': 0
-        }
+        status = "SKIP"
+        dynamic_data = {k: 1.0 if k != 'Outlink_Ratio' and k != 'V9_Has_Hidden_IFrame' else 0.0 for k in dynamic_data.keys()}
     else:
         async with semaphore:
-            # Cơ chế Retry
             for attempt in range(MAX_RETRIES):
                 page = await context.new_page()
-                await page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
-                await page.route("**/*", intercept_route)
-
+                await apply_stealth_logic(page) # Sửa lỗi bot detection
+                
                 try:
-                    # Truy cập trang với timeout lớn
-                    response = await page.goto(url, timeout=TIMEOUT, wait_until="domcontentloaded")
-                    
-                    if response and response.status < 400:
-                        # Giả lập thao tác người dùng: Cuộn chuột nhẹ
-                        await page.mouse.wheel(0, 500)
-                        await asyncio.sleep(2)
+                    # Truy cập với Referer giả lập từ Google
+                    await page.goto(url, timeout=TIMEOUT, wait_until="domcontentloaded")
+                    await asyncio.sleep(2)
 
-                        domain = urlparse(url).netloc.lower()
-                        content = (await page.content()).lower()
-                        title = (await page.title()).lower()
+                    domain = urlparse(url).netloc.lower()
+                    content = (await page.content()).lower()
+                    title = (await page.title()).lower()
 
-                        all_links = await page.query_selector_all('a')
-                        ext_l = 0
-                        for l in all_links:
-                            try:
-                                h = await l.get_attribute('href')
-                                if h and 'http' in h and domain not in h: ext_l += 1
-                            except: continue
+                    all_links = await page.query_selector_all('a')
+                    ext_l = 0
+                    for l in all_links:
+                        try:
+                            h = await l.get_attribute('href')
+                            if h and 'http' in h and domain not in h: ext_l += 1
+                        except: continue
 
-                        dynamic_data = {
-                            'Outlink_Ratio': ext_l / len(all_links) if len(all_links) > 0 else 0,
-                            'HasExternalFormSubmit': 1 if await page.query_selector('form[action^="http"]') else 0,
-                            'HasPasswordField': 1 if await page.query_selector('input[type="password"]') else 0,
-                            'DomainTitleMatchScore': 1 if domain.split('.')[0] in title else 0,
-                            'HasSocialNet': 1 if any(s in content for s in ['facebook', 'twitter', 'linkedin', 'instagram']) else 0,
-                            'HasCopyrightInfo': 1 if ('©' in content or 'copyright' in content) else 0,
-                            'HasDescription': 1 if await page.query_selector('meta[name="description"]') else 0,
-                            'V9_Has_Hidden_IFrame': 1 if any(not await f.is_visible() for f in await page.query_selector_all('iframe')) else 0,
-                            'V5_TLS_Issuer_Reputation': 1 if url.startswith('https') else 0,
-                            'V4_DNS_Volatility_Count': 0
-                        }
-                        status = "SUCCESS"
-                        await page.close()
-                        break # Thoát vòng lặp retry nếu thành công
-                    else:
-                        raise Exception("Trang phản hồi lỗi status code")
-
-                except Exception:
-                    status = "FAILED"
+                    dynamic_data = {
+                        'Outlink_Ratio': ext_l / len(all_links) if len(all_links) > 0 else 0,
+                        'HasExternalFormSubmit': 1 if await page.query_selector('form[action^="http"]') else 0,
+                        'HasPasswordField': 1 if await page.query_selector('input[type="password"]') else 0,
+                        'DomainTitleMatchScore': 1 if domain.split('.')[0] in title else 0,
+                        'HasSocialNet': 1 if any(s in content for s in ['facebook', 'twitter', 'linkedin', 'instagram']) else 0,
+                        'HasCopyrightInfo': 1 if ('©' in content or 'copyright' in content) else 0,
+                        'HasDescription': 1 if await page.query_selector('meta[name="description"]') else 0,
+                        'V9_Has_Hidden_IFrame': 1 if any(not await f.is_visible() for f in await page.query_selector_all('iframe')) else 0,
+                        'V5_TLS_Issuer_Reputation': 1 if url.startswith('https') else 0,
+                        'V4_DNS_Volatility_Count': 0
+                    }
+                    status = "SUCCESS"
+                    await page.close()
+                    break
+                except:
                     if not page.is_closed(): await page.close()
-                    if attempt < MAX_RETRIES - 1:
-                        await asyncio.sleep(3) # Đợi 3 giây trước khi thử lại
+                    await asyncio.sleep(2)
 
-            # Nếu sau các lần thử vẫn hỏng thì gán 0.5
-            if status == "FAILED":
-                dynamic_data = {f: 0.5 for f in ['Outlink_Ratio', 'HasExternalFormSubmit', 'HasPasswordField', 'DomainTitleMatchScore', 
-                                                'HasSocialNet', 'HasCopyrightInfo', 'HasDescription', 'V9_Has_Hidden_IFrame', 
-                                                'V5_TLS_Issuer_Reputation', 'V4_DNS_Volatility_Count']}
-
-    log_handle.write(f"{url} | {status} | Out:{dynamic_data.get('Outlink_Ratio',0):.2f} | {datetime.now().strftime('%H:%M:%S')}\n")
+    log_handle.write(f"{url} | {status} | Out:{dynamic_data.get('Outlink_Ratio',0.5):.2f} | {datetime.now().strftime('%H:%M:%S')}\n")
     log_handle.flush()
     return {**static_data, **dynamic_data, 'label': label}
 
 # =========================================================
-# 4. MAIN
+# 5. CHƯƠNG TRÌNH CHÍNH
 # =========================================================
 async def main():
     start_time = time.time()
-    processed_urls = load_processed_urls()
     if not os.path.exists(INPUT_FILE): return
 
     df_all = pd.read_csv(INPUT_FILE)
     url_col = [c for c in df_all.columns if 'url' in c.lower()][0]
     label_col = [c for c in df_all.columns if 'label' in c.lower()][0]
-    df_to_do = df_all[~df_all[url_col].isin(processed_urls)]
-    total_todo = len(df_to_do)
     
-    print(f"🚀 Chạy bản ổn định: {CONCURRENT_PAGES} luồng | Retry: {MAX_RETRIES} | Còn: {total_todo}")
+    # Đọc danh sách đã xử lý để tránh chạy lại
+    processed = set()
+    if os.path.exists(LOG_FILE):
+        with open(LOG_FILE, 'r') as f:
+            for line in f: processed.add(line.split('|')[0].strip())
+    
+    df_to_do = df_all[~df_all[url_col].isin(processed)]
     semaphore = asyncio.Semaphore(CONCURRENT_PAGES)
-    
+
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True, args=['--disable-blink-features=AutomationControlled'])
+        browser = await p.chromium.launch(headless=True)
+        # Giả lập Browser giống hệt Chrome thật
         context = await browser.new_context(
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
             extra_http_headers={'Accept-Language': 'en-US,en;q=0.9', 'Referer': 'https://www.google.com/'}
         )
 
         with open(LOG_FILE, 'a') as log_h:
-            for i in range(0, total_todo, CONCURRENT_PAGES):
+            for i in range(0, len(df_to_do), CONCURRENT_PAGES):
                 batch = df_to_do.iloc[i : i + CONCURRENT_PAGES]
                 tasks = [extract_task(row[url_col], row[label_col], context, semaphore, log_h) for _, row in batch.iterrows()]
                 results = await asyncio.gather(*tasks)
-                
                 pd.DataFrame(results).to_csv(OUTPUT_FILE, mode='a', index=False, header=not os.path.exists(OUTPUT_FILE))
-                
-                done = i + len(batch)
-                elapsed = time.time() - start_time
-                speed = done / elapsed if elapsed > 0 else 0
-                eta = str(timedelta(seconds=int((total_todo - done) / speed))) if speed > 0 else "N/A"
-                print(f"✅ Xong {done}/{total_todo} | Speed: {speed:.2f} u/s | ETA: {eta}")
+                print(f"✅ Đã xong: {i + len(batch)}/{len(df_to_do)}")
 
         await browser.close()
 
