@@ -2,86 +2,124 @@ import pandas as pd
 import asyncio
 import random
 import os
+
 from playwright.async_api import async_playwright
 from playwright_stealth import stealth
 
-# Cấu hình
 INPUT_FILE = "Dataset_Ready_to_Train.csv"
-TEST_LOG = "test_stealth_results.log"
-NUM_TEST_SAMPLES = 5 # Số lượng URL lấy từ file để test thử
+NUM_TEST_SAMPLES = 5
+
 
 async def check_bypass_level(url, browser):
     results = {"URL": url}
-    
-    # Thử nghiệm 2 cấp độ chính: Basic vs Stealth+Behavior
+
     levels = [
-        ("Level_1_Basic", False, False), 
+        ("Level_1_Basic", False, False),
         ("Level_2_Stealth_Behavior", True, True)
     ]
 
     for name, use_stealth, use_behavior in levels:
         context = await browser.new_context(
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            user_agent=(
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/120.0.0.0 Safari/537.36"
+            ),
+            viewport={"width": 1366, "height": 768},
+            locale="en-US"
         )
-        page = await context.new_page()
-        
-        if use_stealth:
-            await stealth(page) # Vượt dấu vân tay bot
-        
-        try:
-            print(f"Testing {name} on: {url}")
-            # Giả lập Referer nếu là Level cao
-            if use_behavior:
-                await page.set_extra_http_headers({"Referer": "https://www.google.com/"})
-            
-            await page.goto(url, timeout=40000, wait_until="domcontentloaded")
-            
-            if use_behavior:
-                await asyncio.sleep(random.uniform(5, 8))
-                await page.mouse.move(random.randint(100, 500), random.randint(100, 500))
 
-            title = await page.title()
-            content = await page.content()
-            
-            # Kiểm tra xem có dấu hiệu bị chặn không
-            is_blocked = "just a moment" in title.lower() or "cloudflare" in content.lower()
+        page = await context.new_page()
+
+        # ✅ Stealth phải gọi SAU khi new_page
+        if use_stealth:
+            await stealth(page)
+
+            # fallback stealth cho Kali (rất quan trọng)
+            await page.add_init_script("""
+                Object.defineProperty(navigator, 'webdriver', {
+                    get: () => undefined
+                });
+            """)
+
+        try:
+            print(f"[+] Testing {name} -> {url}")
+
+            if use_behavior:
+                await page.set_extra_http_headers({
+                    "Referer": "https://www.google.com/"
+                })
+
+            await page.goto(
+                url,
+                wait_until="domcontentloaded",
+                timeout=40000
+            )
+
+            if use_behavior:
+                await asyncio.sleep(random.uniform(3, 6))
+                await page.mouse.move(
+                    random.randint(100, 500),
+                    random.randint(100, 500)
+                )
+                await page.mouse.wheel(0, random.randint(300, 800))
+
+            title = (await page.title()).lower()
+            html = (await page.content()).lower()
+
+            # ❗ Giảm false positive
+            is_blocked = (
+                "just a moment" in title
+                or "checking your browser" in html
+                or "cloudflare" in html
+            )
+
             results[name] = "SUCCESS" if not is_blocked else "BLOCKED"
-            
+
         except Exception as e:
-            results[name] = f"ERROR: {str(e)[:30]}"
+            results[name] = f"ERROR: {str(e)[:40]}"
+
         finally:
             await page.close()
             await context.close()
-            
+
     return results
+
 
 async def main():
     if not os.path.exists(INPUT_FILE):
-        print(f"Không tìm thấy file {INPUT_FILE}"); return
+        print(f"❌ Không tìm thấy file {INPUT_FILE}")
+        return
 
-    # Đọc file và lấy mẫu ngẫu nhiên
     df = pd.read_csv(INPUT_FILE)
-    test_samples = df.sample(n=min(NUM_TEST_SAMPLES, len(df)))['URL'].tolist()
+    urls = df.sample(n=min(NUM_TEST_SAMPLES, len(df)))["URL"].tolist()
 
-    print(f"--- BẮT ĐẦU KIỂM TRA {len(test_samples)} MẪU TỪ DATA ---")
-    
+    print(f"\n--- BẮT ĐẦU KIỂM TRA {len(urls)} MẪU ---\n")
+
     async with async_playwright() as p:
-        # Chạy có cửa sổ (headful) trên Kali qua xvfb là tốt nhất
-        browser = await p.chromium.launch(headless=False)
-        
-        final_results = []
-        for url in test_samples:
+        browser = await p.chromium.launch(
+            headless=False,
+            args=[
+                "--disable-blink-features=AutomationControlled",
+                "--no-sandbox",
+                "--disable-dev-shm-usage"
+            ]
+        )
+
+        results = []
+        for url in urls:
             res = await check_bypass_level(url, browser)
-            final_results.append(res)
-        
+            results.append(res)
+
         await browser.close()
 
-    # Lưu kết quả test và in ra màn hình
-    df_res = pd.DataFrame(final_results)
-    print("\nKẾT QUẢ KIỂM TRA:")
+    df_res = pd.DataFrame(results)
+    print("\n=== KẾT QUẢ ===")
     print(df_res)
+
     df_res.to_csv("test_summary.csv", index=False)
-    print(f"\nĐã lưu báo cáo chi tiết vào test_summary.csv")
+    print("\n✔ Đã lưu test_summary.csv")
+
 
 if __name__ == "__main__":
     asyncio.run(main())
