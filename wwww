@@ -1,2 +1,4 @@
-python3 -m pip install pandas playwright playwright-stealth
-python3 -m playwright install chromium
+─$ python trichxuat18.py
+  File "/home/kali/phishing_extractor/trichxuat18.py", line 68
+    await route.continue()
+                ^^^^^^^^
