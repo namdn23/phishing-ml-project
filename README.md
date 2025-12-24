@@ -1,3 +1,4 @@
+cat << 'EOF' > /home/kali/phishing_extractor/trichxuat18.py
 import pandas as pd
 import numpy as np
 import math
@@ -173,3 +174,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+EOF
