@@ -1,4 +1,25 @@
-pip install pandas numpy playwright-stealth
-playwright install chromium
-playwright install-deps
-sudo apt install xvfb -y
+└─$ python trichxuat18.py
+
+--- BẮT ĐẦU KIỂM TRA 5 MẪU ---
+
+[+] Testing Level_1_Basic -> https://www.domostroyrf.ru
+Traceback (most recent call last):
+  File "/home/kali/phishing_extractor/trichxuat18.py", line 125, in <module>
+    asyncio.run(main())
+    ~~~~~~~~~~~^^^^^^^^
+  File "/usr/lib/python3.13/asyncio/runners.py", line 195, in run
+    return runner.run(main)
+           ~~~~~~~~~~^^^^^^
+  File "/usr/lib/python3.13/asyncio/runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "/usr/lib/python3.13/asyncio/base_events.py", line 725, in run_until_complete
+    return future.result()
+           ~~~~~~~~~~~~~^^
+  File "/home/kali/phishing_extractor/trichxuat18.py", line 111, in main
+    res = await check_bypass_level(url, browser)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/kali/phishing_extractor/trichxuat18.py", line 36, in check_bypass_level
+    await stealth(page)
+          ~~~~~~~^^^^^^
+TypeError: 'module' object is not callable
