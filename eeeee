@@ -12,17 +12,22 @@ from playwright.async_api import async_playwright
 from concurrent.futures import ProcessPoolExecutor
 
 # =========================================================
-# 1. CẤU HÌNH CHO MÁY 27GB RAM
+# 1. CẤU HÌNH (TỐI ƯU CHO 27GB RAM)
 # =========================================================
 INPUT_FILE = "Dataset_Ready_to_Train.csv"
 OUTPUT_FILE = "Dataset_18_Features_Final.csv"
 LOG_FILE = "detailed_process.log"
 
-NUM_PROCESSES = 10         # Chạy 10 tiến trình song song
-PAGES_PER_PROCESS = 5      # Mỗi tiến trình mở 5 tab (Tổng cộng 50 tabs)
+NUM_PROCESSES = 8          # 8 Tiến trình song song
+PAGES_PER_PROCESS = 5      # 5 Tab mỗi tiến trình (Tổng 40 tabs)
 TIMEOUT = 60000           
 
-# --- Hàm tàng hình (Bypass Cloudflare) ---
+# Đảm bảo file log tồn tại ngay từ đầu
+if not os.path.exists(LOG_FILE):
+    with open(LOG_FILE, "w", encoding="utf-8") as f:
+        f.write(f"--- START LOG: {datetime.now()} ---\n")
+
+# --- Hàm tàng hình & trích xuất tĩnh ---
 async def apply_stealth(page):
     await page.add_init_script("""
         Object.defineProperty(navigator, 'webdriver', { get: () => false });
@@ -30,35 +35,51 @@ async def apply_stealth(page):
         Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
     """)
 
-# ... (Hàm extract_static và calculate_entropy giữ nguyên) ...
+def calculate_entropy(text):
+    if not text: return 0
+    p_x = [float(text.count(chr(x))) / len(text) for x in range(256) if text.count(chr(x)) > 0]
+    return -sum(p * math.log(p, 2) for p in p_x)
+
+def extract_static(url):
+    try:
+        parsed = urlparse(url)
+        domain = parsed.netloc.lower()
+        return {
+            'domainEntropy': calculate_entropy(domain),
+            'V23_Entropy_Subdomain': calculate_entropy(domain.split('.')[0]),
+            'hasIp': 1 if re.match(r'\d+\.\d+\.\d+\.\d+', domain) else 0,
+            'numHypRatio': domain.count('-') / len(domain) if len(domain) > 0 else 0,
+            'domainLength': len(domain),
+            'Subdomain_Level': domain.count('.'),
+            'IsHTTPS': 1 if url.startswith('https') else 0,
+            'URL_Depth': url.count('/') - 2
+        }
+    except: return {f: 0 for f in range(8)}
 
 # =========================================================
-# 2. HÀM XỬ LÝ URL (CẢI TIẾN LOG & SPEED)
+# 2. HÀM XỬ LÝ URL (ÉP GHI LOG NGAY LẬP TỨC)
 # =========================================================
 async def process_url(url, label, context, semaphore, log_file):
-    static_data = extract_static(url) #
+    static_data = extract_static(url)
     dynamic_data = {f: 0.5 for f in ['Outlink_Ratio', 'HasExternalFormSubmit', 'HasPasswordField', 'DomainTitleMatchScore', 
                                     'HasSocialNet', 'HasCopyrightInfo', 'HasDescription', 'V9_Has_Hidden_IFrame', 
-                                    'V5_TLS_Issuer_Reputation', 'V4_DNS_Volatility_Count']} #
-    status, reason = "FAILED", "INIT"
+                                    'V5_TLS_Issuer_Reputation', 'V4_DNS_Volatility_Count']}
+    status, reason = "FAILED", "CRASH"
 
     async with semaphore:
         page = await context.new_page()
-        await apply_stealth(page) #
+        await apply_stealth(page)
         try:
-            await page.set_extra_http_headers({"Referer": "https://www.google.com/"}) #
-            await page.goto(url, timeout=TIMEOUT, wait_until="domcontentloaded") #
-            
-            # Vượt WAF bằng hành vi
-            await asyncio.sleep(random.uniform(3, 6)) #
+            await page.set_extra_http_headers({"Referer": "https://www.google.com/"})
+            await page.goto(url, timeout=TIMEOUT, wait_until="domcontentloaded")
+            await asyncio.sleep(random.uniform(3, 6))
             
             content = (await page.content()).lower()
-            title = (await page.title()) or ""
+            title = (await page.title()) or "NoTitle"
 
             if "just a moment" in title.lower() or "cloudflare" in content:
-                reason = "Cloudflare Blocked"
+                reason = "Cloudflare_Blocked"
             else:
-                # Trích xuất Dynamic
                 domain = urlparse(url).netloc.lower()
                 v9_val = 0
                 for f in page.frames[1:]:
@@ -73,58 +94,57 @@ async def process_url(url, label, context, semaphore, log_file):
                     'DomainTitleMatchScore': 1 if domain.split('.')[0] in title.lower() else 0,
                     'V5_TLS_Issuer_Reputation': 1 if url.startswith('https') else 0
                 })
-                status, reason = "SUCCESS", f"OK: {title[:15]}"
-
+                status, reason = "SUCCESS", f"OK_{title[:15]}"
         except Exception as e:
-            reason = f"ERR: {str(e).splitlines()[0][:40]}"
+            reason = f"ERR_{str(e).splitlines()[0][:30]}"
         finally:
             await page.close()
             
-    # GHI LOG NGAY LẬP TỨC (Flush)
+    # --- LOGGING CƯỠNG BỨC (Cơ chế Flush) ---
     log_line = f"[{datetime.now().strftime('%H:%M:%S')}] {status} | {url} | {reason}\n"
     with open(log_file, "a", encoding="utf-8") as f:
         f.write(log_line)
-        f.flush()
+        f.flush() # Đẩy dữ liệu từ RAM xuống ổ cứng ngay
+        os.fsync(f.fileno()) # Ép hệ điều hành ghi file
     
     return {**static_data, **dynamic_data, 'URL': url, 'label': label}
 
 # =========================================================
-# 3. QUẢN LÝ ĐA LUỒNG & ETA
+# 3. ĐA LUỒNG & LƯU CHECKPOINT CSV
 # =========================================================
 async def run_batch(df_batch):
     async with async_playwright() as p:
-        # Tắt Sandbox để tối ưu tốc độ trên Kali
-        browser = await p.chromium.launch(headless=False, args=['--no-sandbox', '--disable-setuid-sandbox'])
+        browser = await p.chromium.launch(headless=False, args=['--no-sandbox'])
         context = await browser.new_context(user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0")
         semaphore = asyncio.Semaphore(PAGES_PER_PROCESS)
         tasks = [process_url(row['URL'], row['label'], context, semaphore, LOG_FILE) for _, row in df_batch.iterrows()]
         results = await asyncio.gather(*tasks)
         await browser.close()
-        return results #
+        return results
 
 def process_entry(df_batch):
     try: return asyncio.run(run_batch(df_batch))
-    except: return [] #
+    except: return []
 
 if __name__ == "__main__":
-    start_all = time.time()
+    start_time = time.time()
     df_all = pd.read_csv(INPUT_FILE)
     
-    # Checkpoint (Bỏ qua URL đã có trong log)
+    # Đọc Checkpoint từ file Log để bỏ qua URL cũ
     processed_urls = set()
     if os.path.exists(LOG_FILE):
-        with open(LOG_FILE, "r") as f:
+        with open(LOG_FILE, "r", encoding="utf-8") as f:
             for line in f:
                 parts = line.split(" | ")
                 if len(parts) > 1: processed_urls.add(parts[1].strip())
 
     df_todo = df_all[~df_all['URL'].isin(processed_urls)]
-    total_todo = len(df_todo)
-    print(f"🚀 27GB RAM Detect: Chạy {NUM_PROCESSES} luồng x {PAGES_PER_PROCESS} tabs.")
+    total = len(df_todo)
+    print(f"🚀 Tổng URL cần cào: {total} | Đang dùng 27GB RAM cho {NUM_PROCESSES} luồng.")
 
-    # Batch lớn hơn để giảm công sức khởi động browser
-    batch_size = NUM_PROCESSES * 20 
-    for i in range(0, total_todo, batch_size):
+    # Chia batch nhỏ (20 URL mỗi đợt) để lưu file liên tục
+    batch_size = NUM_PROCESSES * 5 
+    for i in range(0, total, batch_size):
         current_batch = df_todo.iloc[i : i + batch_size]
         sub_batches = [b for b in np.array_split(current_batch, NUM_PROCESSES) if not b.empty]
         
@@ -133,12 +153,15 @@ if __name__ == "__main__":
             batch_results = []
             for fut in futures: batch_results.extend(fut.result())
         
+        # --- LƯU CSV NGAY SAU MỖI BATCH (CHECKPOINT) ---
         if batch_results:
             df_res = pd.DataFrame(batch_results)
-            df_res.to_csv(OUTPUT_FILE, mode='a', index=False, header=not os.path.exists(OUTPUT_FILE))
+            # Nếu file chưa có thì ghi header, có rồi thì append không header
+            file_exists = os.path.isfile(OUTPUT_FILE)
+            df_res.to_csv(OUTPUT_FILE, mode='a', index=False, header=not file_exists, encoding="utf-8")
         
-        # Dự báo thời gian thực tế
+        # Tiến độ và ETA
         done = i + len(current_batch)
-        speed = done / (time.time() - start_all)
-        eta = str(timedelta(seconds=int((total_todo - done) / speed))) if speed > 0 else "N/A"
-        print(f"✅ Đã xong: {done}/{total_todo} | Speed: {speed:.2f} URL/s | ETA: {eta}")
+        speed = done / (time.time() - start_time)
+        eta = str(timedelta(seconds=int((total - done) / speed))) if speed > 0 else "N/A"
+        print(f"✅ Đã lưu checkpoint {done}/{total} | Speed: {speed:.2f} URL/s | ETA: {eta}")
