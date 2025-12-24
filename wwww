@@ -1,4 +1,4 @@
-─$ python trichxuat18.py
-  File "/home/kali/phishing_extractor/trichxuat18.py", line 68
-    await route.continue()
-                ^^^^^^^^
+Traceback (most recent call last):
+  File "/home/kali/phishing_extractor/trichxuat18.py", line 11, in <module>
+    from playwright_stealth import stealth_async
+ImportError: cannot import name 'stealth_async' from 'playwright_stealth' (/home/kali/phishing_extractor/venv/lib/python3.13/site-packages/playwright_stealth/__init__.py)
