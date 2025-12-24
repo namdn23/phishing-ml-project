@@ -1,11 +1,4 @@
-try:
-    from playwright_stealth import stealth
-except ImportError:
-    try:
-        from playwright_stealth.stealth import stealth
-    except ImportError:
-        try:
-            from playwright_stealth.stealth import Stealth as stealth
-        except ImportError:
-            stealth = None
-            print("⚠️ Cảnh báo: Không thể nạp thư viện stealth, sẽ chạy không có ẩn danh.")
+mv asyncio asyncio_utils
+mv math math_utils
+mv os os_utils
+mv time time_utils
