@@ -9,7 +9,7 @@ import random
 from datetime import datetime, timedelta
 from urllib.parse import urlparse
 from playwright.async_api import async_playwright
-from playwright_stealth import stealth_async
+from playwright_stealth import stealth
 from concurrent.futures import ProcessPoolExecutor
 
 # =========================================================
