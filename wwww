@@ -11,28 +11,41 @@ from urllib.parse import urlparse
 from playwright.async_api import async_playwright
 
 # =========================================================
-# 1. CẤU HÌNH HỆ THỐNG - TỐI ƯU ĐỂ GIẢM FAILED
+# 1. CẤU HÌNH HỆ THỐNG
 # =========================================================
 INPUT_FILE = "Dataset_Ready_to_Train.csv"
 OUTPUT_FILE = "Dataset_18_Features_Final.csv"
 LOG_FILE = "processed_urls.log"
 TOP_1M_FILE = "top-1m.csv"
 
-# Giảm số luồng xuống 10-15 để tránh bị tường lửa hosting chặn IP
-CONCURRENT_PAGES = 12 
-TIMEOUT = 60000 # Tăng lên 60 giây chờ đợi
-MAX_RETRIES = 2 # Thử lại nếu lỗi
+CONCURRENT_PAGES = 8  # Giảm xuống 8 luồng để cực kỳ an toàn trước Cloudflare
+TIMEOUT = 65000       # 65 giây
+MAX_RETRIES = 2
+
+# Danh sách User-Agents thật để xoay vòng
+USER_AGENTS = [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/121.0"
+]
 
 # =========================================================
-# 2. XỬ LÝ LỖI IMPORT STEALTH (Sửa lỗi hình 1)
+# 2. STEALTH LOGIC CAO CẤP (Vượt Cloudflare & Anti-Bot)
 # =========================================================
-def apply_stealth_logic(page):
-    # Thay vì dùng thư viện lỗi, ta dùng script thủ công để xóa dấu vết bot
-    return page.add_init_script("""
+async def apply_ultra_stealth(page):
+    # Xóa sạch dấu vết Playwright/Automation
+    await page.add_init_script("""
         Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
         window.chrome = { runtime: {} };
         Object.defineProperty(navigator, 'languages', {get: () => ['en-US', 'en']});
         Object.defineProperty(navigator, 'plugins', {get: () => [1, 2, 3, 4, 5]});
+        const getParameter = WebGLRenderingContext.prototype.getParameter;
+        WebGLRenderingContext.prototype.getParameter = function(parameter) {
+            if (parameter === 37445) return 'Intel Open Source Technology Center';
+            if (parameter === 37446) return 'Mesa DRI Intel(R) UHD Graphics 630 (Coffeelake 3x8 GT2)';
+            return getParameter(parameter);
+        };
     """)
 
 # =========================================================
@@ -63,7 +76,7 @@ def extract_static(url):
     }
 
 # =========================================================
-# 4. DYNAMIC FEATURES - CƠ CHẾ RETRY (10 Cột)
+# 4. TRÍCH XUẤT ĐỘNG (10 Cột) - VƯỚI CHUYỂN ĐỘNG CHUỘT
 # =========================================================
 async def extract_task(url, label, context, semaphore, log_handle):
     static_data = extract_static(url)
@@ -74,17 +87,27 @@ async def extract_task(url, label, context, semaphore, log_handle):
 
     if static_data['Is_Top_1M_Domain'] == 1:
         status = "SKIP"
-        dynamic_data = {k: 1.0 if k != 'Outlink_Ratio' and k != 'V9_Has_Hidden_IFrame' else 0.0 for k in dynamic_data.keys()}
+        dynamic_data = {k: 1.0 if k not in ['Outlink_Ratio', 'V9_Has_Hidden_IFrame', 'V4_DNS_Volatility_Count'] else 0.0 for k in dynamic_data.keys()}
     else:
         async with semaphore:
             for attempt in range(MAX_RETRIES):
                 page = await context.new_page()
-                await apply_stealth_logic(page) # Sửa lỗi bot detection
+                await apply_ultra_stealth(page)
                 
                 try:
-                    # Truy cập với Referer giả lập từ Google
+                    # Giả lập hành vi: Referer và Delay ngẫu nhiên
+                    await page.set_extra_http_headers({"Referer": "https://www.google.com/"})
+                    
+                    # Truy cập trang
                     await page.goto(url, timeout=TIMEOUT, wait_until="domcontentloaded")
-                    await asyncio.sleep(2)
+                    
+                    # --- KỸ THUẬT VƯỢT CLOUDFLARE ---
+                    # 1. Di chuyển chuột ngẫu nhiên
+                    await page.mouse.move(random.randint(100, 500), random.randint(100, 500))
+                    # 2. Cuộn trang nhẹ để giả lập người đọc
+                    await page.mouse.wheel(0, 400)
+                    # 3. Chờ script bảo mật chạy xong
+                    await asyncio.sleep(random.uniform(3, 6))
 
                     domain = urlparse(url).netloc.lower()
                     content = (await page.content()).lower()
@@ -113,26 +136,23 @@ async def extract_task(url, label, context, semaphore, log_handle):
                     status = "SUCCESS"
                     await page.close()
                     break
-                except:
+                except Exception:
                     if not page.is_closed(): await page.close()
-                    await asyncio.sleep(2)
+                    await asyncio.sleep(random.uniform(2, 4))
 
-    log_handle.write(f"{url} | {status} | Out:{dynamic_data.get('Outlink_Ratio',0.5):.2f} | {datetime.now().strftime('%H:%M:%S')}\n")
+    log_handle.write(f"{url} | {status} | {datetime.now().strftime('%H:%M:%S')}\n")
     log_handle.flush()
     return {**static_data, **dynamic_data, 'label': label}
 
 # =========================================================
-# 5. CHƯƠNG TRÌNH CHÍNH
+# 5. MAIN
 # =========================================================
 async def main():
-    start_time = time.time()
     if not os.path.exists(INPUT_FILE): return
-
     df_all = pd.read_csv(INPUT_FILE)
     url_col = [c for c in df_all.columns if 'url' in c.lower()][0]
     label_col = [c for c in df_all.columns if 'label' in c.lower()][0]
     
-    # Đọc danh sách đã xử lý để tránh chạy lại
     processed = set()
     if os.path.exists(LOG_FILE):
         with open(LOG_FILE, 'r') as f:
@@ -142,11 +162,13 @@ async def main():
     semaphore = asyncio.Semaphore(CONCURRENT_PAGES)
 
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True)
-        # Giả lập Browser giống hệt Chrome thật
+        # Tắt automation infobar
+        browser = await p.chromium.launch(headless=True, args=['--disable-blink-features=AutomationControlled'])
+        
+        # Tạo context với User-Agent ngẫu nhiên
         context = await browser.new_context(
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            extra_http_headers={'Accept-Language': 'en-US,en;q=0.9', 'Referer': 'https://www.google.com/'}
+            user_agent=random.choice(USER_AGENTS),
+            viewport={'width': 1920, 'height': 1080}
         )
 
         with open(LOG_FILE, 'a') as log_h:
@@ -155,7 +177,7 @@ async def main():
                 tasks = [extract_task(row[url_col], row[label_col], context, semaphore, log_h) for _, row in batch.iterrows()]
                 results = await asyncio.gather(*tasks)
                 pd.DataFrame(results).to_csv(OUTPUT_FILE, mode='a', index=False, header=not os.path.exists(OUTPUT_FILE))
-                print(f"✅ Đã xong: {i + len(batch)}/{len(df_to_do)}")
+                print(f"✅ Batch {i//CONCURRENT_PAGES + 1} xong. Tổng: {min(i + CONCURRENT_PAGES, len(df_to_do))}/{len(df_to_do)}")
 
         await browser.close()
 
