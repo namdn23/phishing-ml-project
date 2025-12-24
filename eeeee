@@ -1,45 +1,87 @@
-https://www.uni-mainz.de | SKIP | Out:0.00|Social:1 | 03:49:20
-https://www.globalreporting.org | SKIP | Out:0.00|Social:1 | 03:49:20
-https://www.nerdscandy.com | SKIP | Out:0.00|Social:1 | 03:49:20
-https://www.aap.org | SKIP | Out:0.00|Social:1 | 03:49:20
-https://www.religionenlibertad.com | SKIP | Out:0.00|Social:1 | 03:49:20
-https://www.funzine.hu | SKIP | Out:0.00|Social:1 | 03:49:20
-https://www.cryptocompare.com | SKIP | Out:0.00|Social:1 | 03:49:20
-https://www.diariodealmeria.es | SKIP | Out:0.00|Social:1 | 03:49:20
-https://www.landed.com | SKIP | Out:0.00|Social:1 | 03:49:20
-https://ipfs.io/ipfs/qmrvvyr84esa2assw9vvwupqjgsdn4c3dwkusfdwzdz3kn?clientid=noc@protocol.ai | SKIP | Out:0.00|Social:1 | 03:49:20
-https://liuy-9a930.web.app/ | FAILED | Out:0.50|Social:0.5 | 03:49:22
-https://service-mitld.firebaseapp.com/ | FAILED | Out:0.50|Social:0.5 | 03:49:22
-http://www.kuradox92.lima-city.de | FAILED | Out:0.50|Social:0.5 | 03:49:22
-https://www.hyderabadonline.in | FAILED | Out:0.50|Social:0.5 | 03:49:22
-http://www.f0519141.xsph.ru | FAILED | Out:0.50|Social:0.5 | 03:49:22
-http://www.teramill.com | FAILED | Out:0.50|Social:0.5 | 03:49:23
-https://www.sfnmjournal.com | FAILED | Out:0.50|Social:0.5 | 03:49:23
-https://www.ooty.ind.in | FAILED | Out:0.50|Social:0.5 | 03:49:23
-https://www.motley.ie | FAILED | Out:0.50|Social:0.5 | 03:49:24
-https://www.musicvideoproduction.guru | FAILED | Out:0.50|Social:0.5 | 03:49:29
-https://www.bwresearch.com | FAILED | Out:0.50|Social:0.5 | 03:49:29
-https://www.voicefmradio.co.uk | FAILED | Out:0.50|Social:0.5 | 03:49:30
-https://www.saffronart.com | FAILED | Out:0.50|Social:0.5 | 03:49:30
-https://www.brightika.com | FAILED | Out:0.50|Social:0.5 | 03:49:30
-https://www.socialpolicy.org | FAILED | Out:0.50|Social:0.5 | 03:49:30
-https://www.town.minamichita.lg.jp | FAILED | Out:0.50|Social:0.5 | 03:49:30
-https://www.aoh61.com | FAILED | Out:0.50|Social:0.5 | 03:49:30
-https://www.southbankmosaics.com | FAILED | Out:0.50|Social:0.5 | 03:49:30
-https://www.bulgariaski.com | FAILED | Out:0.50|Social:0.5 | 03:49:33
-https://www.dixxon.com | FAILED | Out:0.50|Social:0.5 | 03:49:33
-http://att-103731-107123.weeblysite.com/ | SKIP | Out:0.00|Social:1 | 03:49:34
-https://www.vysor.io | SKIP | Out:0.00|Social:1 | 03:49:34
-https://www.senacases.com | SKIP | Out:0.00|Social:1 | 03:49:34
-https://www.klerk.ru | SKIP | Out:0.00|Social:1 | 03:49:34
-https://www.karenmillen.com | SKIP | Out:0.00|Social:1 | 03:49:34
-https://www.lanereport.com | SKIP | Out:0.00|Social:1 | 03:49:34
-https://www.coraevans.com | SKIP | Out:0.00|Social:1 | 03:49:34
-https://www.larepublica.co | SKIP | Out:0.00|Social:1 | 03:49:34
-https://www.radware.com | SKIP | Out:0.00|Social:1 | 03:49:34
-https://mechinchem-5cb8a.web.app/ | FAILED | Out:0.50|Social:0.5 | 03:49:35
-https://dev-634536.pantheonsite.io/ | FAILED | Out:0.50|Social:0.5 | 03:49:35
-https://fb-restriction-case-97be5.web.app/ | FAILED | Out:0.50|Social:0.5 | 03:49:35
-https://hidok4f8zl.firebaseapp.com/ | FAILED | Out:0.50|Social:0.5 | 03:49:35
-http://www.fairytalesinc.com | FAILED | Out:0.50|Social:0.5 | 03:49:36
-http://www.httpzen.fairhash.org | FAILED | Out:0.50|Social:0.5 | 03:49:36
+import pandas as pd
+import asyncio
+import random
+import os
+from playwright.async_api import async_playwright
+from playwright_stealth import stealth_async
+
+# Cấu hình
+INPUT_FILE = "Dataset_Ready_to_Train.csv"
+TEST_LOG = "test_stealth_results.log"
+NUM_TEST_SAMPLES = 5 # Số lượng URL lấy từ file để test thử
+
+async def check_bypass_level(url, browser):
+    results = {"URL": url}
+    
+    # Thử nghiệm 2 cấp độ chính: Basic vs Stealth+Behavior
+    levels = [
+        ("Level_1_Basic", False, False), 
+        ("Level_2_Stealth_Behavior", True, True)
+    ]
+
+    for name, use_stealth, use_behavior in levels:
+        context = await browser.new_context(
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        )
+        page = await context.new_page()
+        
+        if use_stealth:
+            await stealth_async(page) # Vượt dấu vân tay bot
+        
+        try:
+            print(f"Testing {name} on: {url}")
+            # Giả lập Referer nếu là Level cao
+            if use_behavior:
+                await page.set_extra_http_headers({"Referer": "https://www.google.com/"})
+            
+            await page.goto(url, timeout=40000, wait_until="domcontentloaded")
+            
+            if use_behavior:
+                await asyncio.sleep(random.uniform(5, 8))
+                await page.mouse.move(random.randint(100, 500), random.randint(100, 500))
+
+            title = await page.title()
+            content = await page.content()
+            
+            # Kiểm tra xem có dấu hiệu bị chặn không
+            is_blocked = "just a moment" in title.lower() or "cloudflare" in content.lower()
+            results[name] = "SUCCESS" if not is_blocked else "BLOCKED"
+            
+        except Exception as e:
+            results[name] = f"ERROR: {str(e)[:30]}"
+        finally:
+            await page.close()
+            await context.close()
+            
+    return results
+
+async def main():
+    if not os.path.exists(INPUT_FILE):
+        print(f"Không tìm thấy file {INPUT_FILE}"); return
+
+    # Đọc file và lấy mẫu ngẫu nhiên
+    df = pd.read_csv(INPUT_FILE)
+    test_samples = df.sample(n=min(NUM_TEST_SAMPLES, len(df)))['URL'].tolist()
+
+    print(f"--- BẮT ĐẦU KIỂM TRA {len(test_samples)} MẪU TỪ DATA ---")
+    
+    async with async_playwright() as p:
+        # Chạy có cửa sổ (headful) trên Kali qua xvfb là tốt nhất
+        browser = await p.chromium.launch(headless=False)
+        
+        final_results = []
+        for url in test_samples:
+            res = await check_bypass_level(url, browser)
+            final_results.append(res)
+        
+        await browser.close()
+
+    # Lưu kết quả test và in ra màn hình
+    df_res = pd.DataFrame(final_results)
+    print("\nKẾT QUẢ KIỂM TRA:")
+    print(df_res)
+    df_res.to_csv("test_summary.csv", index=False)
+    print(f"\nĐã lưu báo cáo chi tiết vào test_summary.csv")
+
+if __name__ == "__main__":
+    asyncio.run(main())
