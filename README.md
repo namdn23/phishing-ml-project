@@ -8,7 +8,7 @@ from urllib.parse import urlparse
 from playwright.async_api import async_playwright
 
 # --- CẤU HÌNH HỆ THỐNG ---
-INPUT_FILE = "Dataset_tu_7z.csv" 
+INPUT_FILE = "Dataset_Ready_to_Train.csv" 
 OUTPUT_FILE = "Dataset_18_Features_Final.csv"
 LOG_FILE = "processed_urls.log"  # Lưu vết các URL đã xong
 TOP_1M_FILE = "top-1m.csv"
