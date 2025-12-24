@@ -11,34 +11,28 @@ from urllib.parse import urlparse
 from playwright.async_api import async_playwright
 
 # =========================================================
-# CẤU HÌNH HỆ THỐNG
+# 1. CẤU HÌNH ĐA LUỒNG & HỆ THỐNG
 # =========================================================
 INPUT_FILE = "Dataset_Ready_to_Train.csv"
 OUTPUT_FILE = "Dataset_18_Features_Final.csv"
 LOG_FILE = "processed_urls.log"
 TOP_1M_FILE = "top-1m.csv"
 
-CONCURRENT_PAGES = 30 
-TIMEOUT = 25000
-
-USER_AGENTS = [
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-]
+# Số lượng luồng chạy song song (Tùy vào RAM, 30-40 là đẹp trên Kali)
+CONCURRENT_PAGES = 35 
+TIMEOUT = 45000 # 45 giây cho mỗi trang
 
 # =========================================================
-# HÀM BỔ TRỢ
+# 2. HÀM BỔ TRỢ & ĐẶC TRƯNG TĨNH (8 Features)
 # =========================================================
 def load_processed_urls():
     if os.path.exists(LOG_FILE):
         with open(LOG_FILE, 'r') as f:
-            # Chỉ lấy URL (phần đầu trước dấu |)
             return set(line.split('|')[0].strip() for line in f if line.strip())
     return set()
 
 try:
-    top_1m_df = pd.read_csv(TOP_1M_FILE, header=None)
-    top_1m_set = set(top_1m_df[1].astype(str).str.lower().values)
+    top_1m_set = set(pd.read_csv(TOP_1M_FILE, header=None)[1].astype(str).str.lower().values)
 except:
     top_1m_set = set()
 
@@ -62,6 +56,7 @@ def extract_static(url):
     }
 
 async def intercept_route(route):
+    # Chặn tài nguyên nặng để đa luồng chạy mượt hơn
     if route.request.resource_type in ["image", "media", "font"]:
         await route.abort()
     else:
@@ -69,12 +64,12 @@ async def intercept_route(route):
         except: pass
 
 # =========================================================
-# TRÍCH XUẤT DYNAMIC FEATURES
+# 3. LOGIC TRÍCH XUẤT ĐỘNG (10 Features) - XỬ LÝ ĐA LUỒNG
 # =========================================================
-async def extract_dynamic(url, label, context, semaphore, log_handle):
+async def extract_task(url, label, context, semaphore, log_handle):
     static_data = extract_static(url)
     status = "SKIP"
-
+    
     if static_data['Is_Top_1M_Domain'] == 1:
         dynamic_data = {
             'Outlink_Ratio': 0.0, 'HasExternalFormSubmit': 0, 'HasPasswordField': 0,
@@ -82,38 +77,45 @@ async def extract_dynamic(url, label, context, semaphore, log_handle):
             'V9_Has_Hidden_IFrame': 0, 'V5_TLS_Issuer_Reputation': 1, 'V4_DNS_Volatility_Count': 0
         }
     else:
+        # Sử dụng semaphore để giới hạn số tab mở cùng lúc
         async with semaphore:
             page = await context.new_page()
+            # Giả dạng người dùng (Anti-bot)
             await page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
             await page.route("**/*", intercept_route)
+
             try:
                 await page.goto(url, timeout=TIMEOUT, wait_until="domcontentloaded")
-                await asyncio.sleep(1)
+                await asyncio.sleep(1.5) # Chờ trang ổn định
+
                 domain = urlparse(url).netloc.lower()
                 content = (await page.content()).lower()
                 title = (await page.title()).lower()
 
+                # Trích xuất liên kết
                 all_links = await page.query_selector_all('a')
-                ext_links = 0
+                ext_l = 0
                 for l in all_links:
                     try:
                         h = await l.get_attribute('href')
-                        if h and 'http' in h and domain not in h: ext_links += 1
+                        if h and 'http' in h and domain not in h: ext_l += 1
                     except: continue
 
                 dynamic_data = {
-                    'Outlink_Ratio': ext_links / len(all_links) if len(all_links) > 0 else 0,
+                    'Outlink_Ratio': ext_l / len(all_links) if len(all_links) > 0 else 0,
                     'HasExternalFormSubmit': 1 if await page.query_selector('form[action^="http"]') else 0,
                     'HasPasswordField': 1 if await page.query_selector('input[type="password"]') else 0,
                     'DomainTitleMatchScore': 1 if domain.split('.')[0] in title else 0,
-                    'HasSocialNet': 1 if any(s in content for s in ['facebook', 'twitter', 'linkedin']) else 0,
+                    'HasSocialNet': 1 if any(s in content for s in ['facebook', 'twitter', 'linkedin', 'instagram']) else 0,
                     'HasCopyrightInfo': 1 if ('©' in content or 'copyright' in content) else 0,
                     'HasDescription': 1 if await page.query_selector('meta[name="description"]') else 0,
                     'V9_Has_Hidden_IFrame': 1 if any(not await f.is_visible() for f in await page.query_selector_all('iframe')) else 0,
-                    'V5_TLS_Issuer_Reputation': 1, 'V4_DNS_Volatility_Count': 0
+                    'V5_TLS_Issuer_Reputation': 1 if url.startswith('https') else 0,
+                    'V4_DNS_Volatility_Count': 0
                 }
                 status = "SUCCESS"
-            except:
+            except Exception:
+                # Nếu trang lỗi gán giá trị 0.5 (Neutral)
                 dynamic_data = {f: 0.5 for f in ['Outlink_Ratio', 'HasExternalFormSubmit', 'HasPasswordField', 'DomainTitleMatchScore', 
                                                 'HasSocialNet', 'HasCopyrightInfo', 'HasDescription', 'V9_Has_Hidden_IFrame', 
                                                 'V5_TLS_Issuer_Reputation', 'V4_DNS_Volatility_Count']}
@@ -121,51 +123,69 @@ async def extract_dynamic(url, label, context, semaphore, log_handle):
             finally:
                 if not page.is_closed(): await page.close()
 
-    # Ghi log kèm kết quả tóm tắt
-    summary = f"Out:{dynamic_data['Outlink_Ratio']:.2f}|Social:{dynamic_data['HasSocialNet']}"
-    log_handle.write(f"{url} | {status} | {summary} | {datetime.now().strftime('%H:%M:%S')}\n")
+    # Lưu Log chi tiết
+    log_handle.write(f"{url} | {status} | Out:{dynamic_data.get('Outlink_Ratio',0):.2f} | {datetime.now().strftime('%H:%M:%S')}\n")
     log_handle.flush()
     
     return {**static_data, **dynamic_data, 'label': label}
 
 # =========================================================
-# MAIN
+# 4. QUẢN LÝ TIẾN TRÌNH CHÍNH
 # =========================================================
 async def main():
     start_time = time.time()
     processed_urls = load_processed_urls()
 
-    if not os.path.exists(INPUT_FILE): return
+    if not os.path.exists(INPUT_FILE):
+        print(f"❌ Không thấy file {INPUT_FILE}")
+        return
+
     df_all = pd.read_csv(INPUT_FILE)
     url_col = [c for c in df_all.columns if 'url' in c.lower()][0]
     label_col = [c for c in df_all.columns if 'label' in c.lower()][0]
     
     df_to_do = df_all[~df_all[url_col].isin(processed_urls)]
     total_todo = len(df_to_do)
-    print(f"🚀 Bắt đầu: {total_todo} URL còn lại")
+    
+    print(f"🚀 Bắt đầu đa luồng: {CONCURRENT_PAGES} luồng | Còn lại: {total_todo} URL")
 
     semaphore = asyncio.Semaphore(CONCURRENT_PAGES)
+    
     async with async_playwright() as p:
+        # Chạy trình duyệt Chromium
         browser = await p.chromium.launch(headless=True, args=['--disable-blink-features=AutomationControlled'])
-        context = await browser.new_context(user_agent=random.choice(USER_AGENTS), ignore_https_errors=True)
+        
+        # Tạo Context giả lập trình duyệt thật
+        context = await browser.new_context(
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            extra_http_headers={'Accept-Language': 'en-US,en;q=0.9'}
+        )
 
-        with open(LOG_FILE, 'a') as log_handle:
+        with open(LOG_FILE, 'a') as log_h:
+            # Chia nhỏ dữ liệu thành từng Batch để lưu CSV liên tục
             for i in range(0, total_todo, CONCURRENT_PAGES):
-                batch = df_to_do.iloc[i:i + CONCURRENT_PAGES]
-                tasks = [extract_dynamic(row[url_col], row[label_col], context, semaphore, log_handle) for _, row in batch.iterrows()]
+                batch = df_to_do.iloc[i : i + CONCURRENT_PAGES]
                 
+                # Tạo danh sách các task chạy song song
+                tasks = [
+                    extract_task(row[url_col], row[label_col], context, semaphore, log_h) 
+                    for _, row in batch.iterrows()
+                ]
+                
+                # Chờ cả batch hoàn thành
                 results = await asyncio.gather(*tasks)
-                pd.DataFrame(results).to_csv(OUTPUT_FILE, mode='a', index=False, header=not os.path.exists(OUTPUT_FILE))
                 
-                # --- TÍNH TOÁN THỜI GIAN DỰ ĐOÁN ---
-                done_so_far = i + len(batch)
+                # Lưu vào file CSV ngay lập tức
+                output_df = pd.DataFrame(results)
+                output_df.to_csv(OUTPUT_FILE, mode='a', index=False, header=not os.path.exists(OUTPUT_FILE))
+                
+                # Tính tốc độ & Dự báo
+                done = i + len(batch)
                 elapsed = time.time() - start_time
-                speed = done_so_far / elapsed # URL per second
-                remaining = total_todo - done_so_far
-                eta_seconds = remaining / speed if speed > 0 else 0
-                eta_str = str(timedelta(seconds=int(eta_seconds)))
+                speed = done / elapsed if elapsed > 0 else 0
+                eta = str(timedelta(seconds=int((total_todo - done) / speed))) if speed > 0 else "N/A"
                 
-                print(f"✅ {done_so_far}/{total_todo} ({ (done_so_far/total_todo*100):.1f}%) | Tốc độ: {speed:.2f} u/s | Còn lại: {eta_str}")
+                print(f"✅ Đã xong {done}/{total_todo} | Tốc độ: {speed:.2f} URL/s | Ước tính xong sau: {eta}")
 
         await browser.close()
 
