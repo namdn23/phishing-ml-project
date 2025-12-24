@@ -1,125 +1,144 @@
 import pandas as pd
+import numpy as np
+import math
+import re
 import asyncio
-import random
 import os
-
+import time
+import random
+from datetime import datetime, timedelta
+from urllib.parse import urlparse
 from playwright.async_api import async_playwright
-from playwright_stealth import stealth
+from concurrent.futures import ProcessPoolExecutor
 
+# =========================================================
+# 1. CẤU HÌNH CHO MÁY 27GB RAM
+# =========================================================
 INPUT_FILE = "Dataset_Ready_to_Train.csv"
-NUM_TEST_SAMPLES = 5
+OUTPUT_FILE = "Dataset_18_Features_Final.csv"
+LOG_FILE = "detailed_process.log"
 
+NUM_PROCESSES = 10         # Chạy 10 tiến trình song song
+PAGES_PER_PROCESS = 5      # Mỗi tiến trình mở 5 tab (Tổng cộng 50 tabs)
+TIMEOUT = 60000           
 
-async def check_bypass_level(url, browser):
-    results = {"URL": url}
+# --- Hàm tàng hình (Bypass Cloudflare) ---
+async def apply_stealth(page):
+    await page.add_init_script("""
+        Object.defineProperty(navigator, 'webdriver', { get: () => false });
+        window.chrome = { runtime: {} };
+        Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
+    """)
 
-    levels = [
-        ("Level_1_Basic", False, False),
-        ("Level_2_Stealth_Behavior", True, True)
-    ]
+# ... (Hàm extract_static và calculate_entropy giữ nguyên) ...
 
-    for name, use_stealth, use_behavior in levels:
-        context = await browser.new_context(
-            user_agent=(
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/120.0.0.0 Safari/537.36"
-            ),
-            viewport={"width": 1366, "height": 768},
-            locale="en-US"
-        )
+# =========================================================
+# 2. HÀM XỬ LÝ URL (CẢI TIẾN LOG & SPEED)
+# =========================================================
+async def process_url(url, label, context, semaphore, log_file):
+    static_data = extract_static(url) #
+    dynamic_data = {f: 0.5 for f in ['Outlink_Ratio', 'HasExternalFormSubmit', 'HasPasswordField', 'DomainTitleMatchScore', 
+                                    'HasSocialNet', 'HasCopyrightInfo', 'HasDescription', 'V9_Has_Hidden_IFrame', 
+                                    'V5_TLS_Issuer_Reputation', 'V4_DNS_Volatility_Count']} #
+    status, reason = "FAILED", "INIT"
 
+    async with semaphore:
         page = await context.new_page()
-
-        # ✅ Stealth phải gọi SAU khi new_page
-        if use_stealth:
-            await stealth(page)
-
-            # fallback stealth cho Kali (rất quan trọng)
-            await page.add_init_script("""
-                Object.defineProperty(navigator, 'webdriver', {
-                    get: () => undefined
-                });
-            """)
-
+        await apply_stealth(page) #
         try:
-            print(f"[+] Testing {name} -> {url}")
+            await page.set_extra_http_headers({"Referer": "https://www.google.com/"}) #
+            await page.goto(url, timeout=TIMEOUT, wait_until="domcontentloaded") #
+            
+            # Vượt WAF bằng hành vi
+            await asyncio.sleep(random.uniform(3, 6)) #
+            
+            content = (await page.content()).lower()
+            title = (await page.title()) or ""
 
-            if use_behavior:
-                await page.set_extra_http_headers({
-                    "Referer": "https://www.google.com/"
+            if "just a moment" in title.lower() or "cloudflare" in content:
+                reason = "Cloudflare Blocked"
+            else:
+                # Trích xuất Dynamic
+                domain = urlparse(url).netloc.lower()
+                v9_val = 0
+                for f in page.frames[1:]:
+                    try:
+                        el = await f.frame_element()
+                        if el and not await el.is_visible(): v9_val = 1; break
+                    except: continue
+
+                dynamic_data.update({
+                    'V9_Has_Hidden_IFrame': v9_val,
+                    'HasPasswordField': 1 if await page.query_selector('input[type="password"]') else 0,
+                    'DomainTitleMatchScore': 1 if domain.split('.')[0] in title.lower() else 0,
+                    'V5_TLS_Issuer_Reputation': 1 if url.startswith('https') else 0
                 })
-
-            await page.goto(
-                url,
-                wait_until="domcontentloaded",
-                timeout=40000
-            )
-
-            if use_behavior:
-                await asyncio.sleep(random.uniform(3, 6))
-                await page.mouse.move(
-                    random.randint(100, 500),
-                    random.randint(100, 500)
-                )
-                await page.mouse.wheel(0, random.randint(300, 800))
-
-            title = (await page.title()).lower()
-            html = (await page.content()).lower()
-
-            # ❗ Giảm false positive
-            is_blocked = (
-                "just a moment" in title
-                or "checking your browser" in html
-                or "cloudflare" in html
-            )
-
-            results[name] = "SUCCESS" if not is_blocked else "BLOCKED"
+                status, reason = "SUCCESS", f"OK: {title[:15]}"
 
         except Exception as e:
-            results[name] = f"ERROR: {str(e)[:40]}"
-
+            reason = f"ERR: {str(e).splitlines()[0][:40]}"
         finally:
             await page.close()
-            await context.close()
+            
+    # GHI LOG NGAY LẬP TỨC (Flush)
+    log_line = f"[{datetime.now().strftime('%H:%M:%S')}] {status} | {url} | {reason}\n"
+    with open(log_file, "a", encoding="utf-8") as f:
+        f.write(log_line)
+        f.flush()
+    
+    return {**static_data, **dynamic_data, 'URL': url, 'label': label}
 
-    return results
-
-
-async def main():
-    if not os.path.exists(INPUT_FILE):
-        print(f"❌ Không tìm thấy file {INPUT_FILE}")
-        return
-
-    df = pd.read_csv(INPUT_FILE)
-    urls = df.sample(n=min(NUM_TEST_SAMPLES, len(df)))["URL"].tolist()
-
-    print(f"\n--- BẮT ĐẦU KIỂM TRA {len(urls)} MẪU ---\n")
-
+# =========================================================
+# 3. QUẢN LÝ ĐA LUỒNG & ETA
+# =========================================================
+async def run_batch(df_batch):
     async with async_playwright() as p:
-        browser = await p.chromium.launch(
-            headless=False,
-            args=[
-                "--disable-blink-features=AutomationControlled",
-                "--no-sandbox",
-                "--disable-dev-shm-usage"
-            ]
-        )
-
-        results = []
-        for url in urls:
-            res = await check_bypass_level(url, browser)
-            results.append(res)
-
+        # Tắt Sandbox để tối ưu tốc độ trên Kali
+        browser = await p.chromium.launch(headless=False, args=['--no-sandbox', '--disable-setuid-sandbox'])
+        context = await browser.new_context(user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0")
+        semaphore = asyncio.Semaphore(PAGES_PER_PROCESS)
+        tasks = [process_url(row['URL'], row['label'], context, semaphore, LOG_FILE) for _, row in df_batch.iterrows()]
+        results = await asyncio.gather(*tasks)
         await browser.close()
+        return results #
 
-    df_res = pd.DataFrame(results)
-    print("\n=== KẾT QUẢ ===")
-    print(df_res)
-
-    df_res.to_csv("test_summary.csv", index=False)
-    print("\n✔ Đã lưu test_summary.csv")
-
+def process_entry(df_batch):
+    try: return asyncio.run(run_batch(df_batch))
+    except: return [] #
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    start_all = time.time()
+    df_all = pd.read_csv(INPUT_FILE)
+    
+    # Checkpoint (Bỏ qua URL đã có trong log)
+    processed_urls = set()
+    if os.path.exists(LOG_FILE):
+        with open(LOG_FILE, "r") as f:
+            for line in f:
+                parts = line.split(" | ")
+                if len(parts) > 1: processed_urls.add(parts[1].strip())
+
+    df_todo = df_all[~df_all['URL'].isin(processed_urls)]
+    total_todo = len(df_todo)
+    print(f"🚀 27GB RAM Detect: Chạy {NUM_PROCESSES} luồng x {PAGES_PER_PROCESS} tabs.")
+
+    # Batch lớn hơn để giảm công sức khởi động browser
+    batch_size = NUM_PROCESSES * 20 
+    for i in range(0, total_todo, batch_size):
+        current_batch = df_todo.iloc[i : i + batch_size]
+        sub_batches = [b for b in np.array_split(current_batch, NUM_PROCESSES) if not b.empty]
+        
+        with ProcessPoolExecutor(max_workers=NUM_PROCESSES) as executor:
+            futures = [executor.submit(process_entry, sub_batches[p]) for p in range(len(sub_batches))]
+            batch_results = []
+            for fut in futures: batch_results.extend(fut.result())
+        
+        if batch_results:
+            df_res = pd.DataFrame(batch_results)
+            df_res.to_csv(OUTPUT_FILE, mode='a', index=False, header=not os.path.exists(OUTPUT_FILE))
+        
+        # Dự báo thời gian thực tế
+        done = i + len(current_batch)
+        speed = done / (time.time() - start_all)
+        eta = str(timedelta(seconds=int((total_todo - done) / speed))) if speed > 0 else "N/A"
+        print(f"✅ Đã xong: {done}/{total_todo} | Speed: {speed:.2f} URL/s | ETA: {eta}")
