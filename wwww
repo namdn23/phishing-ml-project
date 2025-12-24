@@ -19,13 +19,31 @@ OUTPUT_FILE = "Dataset_18_Features_Final.csv"
 LOG_FILE = "detailed_process.log"
 TOP_1M_FILE = "top-1m.csv"
 
-NUM_PROCESSES = 3         # Số cửa sổ trình duyệt chạy song song (Kali 8GB RAM nên để 3-4)
-PAGES_PER_PROCESS = 3     # Mỗi cửa sổ mở bao nhiêu tab
-TIMEOUT = 70000           
+NUM_PROCESSES = 3         # Số cửa sổ trình duyệt (Process)
+PAGES_PER_PROCESS = 3     # Số tab trong mỗi cửa sổ (Semaphore)
+TIMEOUT = 70000           # 70 giây
 
 # =========================================================
-# 2. HÀM TRÍCH XUẤT CHÍNH (Xử lý trong 1 Process)
+# 2. HÀM TRÍCH XUẤT STATIC & DYNAMIC
 # =========================================================
+
+def calculate_entropy(text):
+    if not text: return 0
+    p_x = [float(text.count(chr(x))) / len(text) for x in range(256) if text.count(chr(x)) > 0]
+    return -sum(p * math.log(p, 2) for p in p_x)
+
+def extract_static(url):
+    parsed = urlparse(url)
+    domain = parsed.netloc.lower()
+    return {
+        'domainEntropy': calculate_entropy(domain),
+        'V23_Entropy_Subdomain': calculate_entropy(domain.split('.')[0]),
+        'hasIp': 1 if re.match(r'\d+\.\d+\.\d+\.\d+', domain) else 0,
+        'numHypRatio': domain.count('-') / len(domain) if len(domain) > 0 else 0,
+        'domainLength': len(domain),
+        'Subdomain_Level': domain.count('.'),
+        'IsHTTPS': 1 if url.startswith('https') else 0
+    }
 
 async def apply_stealth(page):
     await page.add_init_script("""
@@ -34,10 +52,9 @@ async def apply_stealth(page):
     """)
 
 async def process_url(url, label, context, semaphore, log_file):
-    static_data = extract_static(url) # Hàm static giữ nguyên như cũ
+    static_data = extract_static(url)
     dynamic_data = {f: 0.5 for f in ['Outlink_Ratio', 'HasExternalFormSubmit', 'HasPasswordField', 'DomainTitleMatchScore', 
                                     'HasSocialNet', 'HasCopyrightInfo', 'HasDescription', 'V9_Has_Hidden_IFrame']}
-    
     status = "FAILED"
     check_info = ""
 
@@ -45,80 +62,83 @@ async def process_url(url, label, context, semaphore, log_file):
         page = await context.new_page()
         await apply_stealth(page)
         try:
+            # 1. Truy cập
             await page.goto(url, timeout=TIMEOUT, wait_until="networkidle")
             
-            # Giả lập hành vi
+            # 2. Giả lập hành vi (Vượt chặn)
             await page.mouse.wheel(0, 500)
-            await asyncio.sleep(random.uniform(4, 6))
+            await asyncio.sleep(random.uniform(4, 7))
 
+            # 3. Trích xuất
             title = (await page.title()) or "No Title"
-            domain = urlparse(url).netloc
+            domain = urlparse(url).netloc.lower()
             content = (await page.content()).lower()
 
-            # Trích xuất IFrame ẩn (V9)
+            # Feature V9 (IFrame ẩn)
             v9 = 1 if any(not await f.frame_element().is_visible() for f in page.frames[1:] if f.frame_element()) else 0
             
             # Outlink Ratio
             links = await page.query_selector_all('a')
             ext_l = 0
             for l in links:
-                h = await l.get_attribute('href')
-                if h and 'http' in h and domain not in h: ext_l += 1
+                try:
+                    h = await l.get_attribute('href')
+                    if h and 'http' in h and domain not in h: ext_l += 1
+                except: continue
             
-            outlink_ratio = ext_l / len(links) if links else 0
+            out_ratio = ext_l / len(links) if links else 0
 
             dynamic_data.update({
-                'Outlink_Ratio': outlink_ratio,
+                'Outlink_Ratio': out_ratio,
                 'V9_Has_Hidden_IFrame': v9,
-                'DomainTitleMatchScore': 1 if domain.split('.')[0].lower() in title.lower() else 0,
+                'DomainTitleMatchScore': 1 if domain.split('.')[0] in title.lower() else 0,
                 'HasPasswordField': 1 if await page.query_selector('input[type="password"]') else 0,
+                'HasSocialNet': 1 if any(s in content for s in ['facebook', 'twitter', 'instagram']) else 0
             })
             status = "SUCCESS"
-            check_info = f"Title: {title[:30]}... | Outlink: {outlink_ratio:.2f} | V9: {v9}"
+            check_info = f"T: {title[:20]} | Out: {out_ratio:.2f} | V9: {v9}"
         except Exception as e:
             check_info = str(e)[:30]
         finally:
             await page.close()
             
-    # Ghi log chi tiết để check
+    # Ghi log kèm dữ liệu để check
     with open(log_file, "a", encoding="utf-8") as f:
         f.write(f"[{datetime.now().strftime('%H:%M:%S')}] {status} | {url} | {check_info}\n")
     
-    return {**static_data, **dynamic_data, 'url': url, 'label': label}
+    return {**static_data, **dynamic_data, 'URL': url, 'label': label}
 
 # =========================================================
-# 3. QUẢN LÝ ĐA LUỒNG (ASYNCHRONOUS RUNNER)
+# 3. RUNNER & BATCH MANAGEMENT
 # =========================================================
 
 async def run_batch(df_batch, process_id):
-    results = []
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=False, args=['--disable-blink-features=AutomationControlled'])
         context = await browser.new_context(viewport={'width': 1280, 'height': 800})
         semaphore = asyncio.Semaphore(PAGES_PER_PROCESS)
         
-        tasks = [process_url(row['url'], row['label'], context, semaphore, LOG_FILE) for _, row in df_batch.iterrows()]
+        tasks = [process_url(row['URL'], row['label'], context, semaphore, LOG_FILE) for _, row in df_batch.iterrows()]
         results = await asyncio.gather(*tasks)
         
         await browser.close()
-    return results
+        return results
 
 def process_entry(df_batch, process_id):
     return asyncio.run(run_batch(df_batch, process_id))
 
 # =========================================================
-# 4. HÀM STATIC & MAIN (DỰ ĐOÁN THỜI GIAN)
+# 4. EXECUTION
 # =========================================================
-
-def extract_static(url):
-    # (Giữ nguyên hàm extract_static cũ của ông ở đây)
-    return {'domainLength': len(url)} # Ví dụ rút gọn
 
 if __name__ == "__main__":
     start_time = time.time()
+    if not os.path.exists(INPUT_FILE):
+        print("❌ Không tìm thấy file đầu vào!"); exit()
+
     df_all = pd.read_csv(INPUT_FILE)
     
-    # Check log để resume (không cào lại)
+    # Resume logic: Check log để bỏ qua URL đã làm
     processed_urls = set()
     if os.path.exists(LOG_FILE):
         with open(LOG_FILE, "r", encoding="utf-8") as f:
@@ -126,15 +146,15 @@ if __name__ == "__main__":
                 parts = line.split(" | ")
                 if len(parts) > 1: processed_urls.add(parts[1].strip())
 
-    df_todo = df_all[~df_all['url'].isin(processed_urls)]
+    # Lọc lấy những URL chưa xử lý
+    df_todo = df_all[~df_all['URL'].isin(processed_urls)]
     total = len(df_todo)
-    print(f"🚀 Bắt đầu cào {total} URL với {NUM_PROCESSES} luồng...")
+    
+    print(f"🚀 Tổng cộng: {total} URL cần xử lý. Đang dùng {NUM_PROCESSES} Process.")
 
-    batch_size = 20 # Lưu file sau mỗi 20 URL
+    batch_size = NUM_PROCESSES * 10  # Mỗi lần lưu file sau khi xong 30 URL
     for i in range(0, total, batch_size):
         current_batch = df_todo.iloc[i : i + batch_size]
-        
-        # Chia nhỏ batch cho các Process
         sub_batches = np.array_split(current_batch, NUM_PROCESSES)
         
         with ProcessPoolExecutor(max_workers=NUM_PROCESSES) as executor:
@@ -143,13 +163,13 @@ if __name__ == "__main__":
             for fut in futures:
                 batch_results.extend(fut.result())
         
-        # Lưu dữ liệu ngay lập tức
+        # Lưu vào CSV ngay lập tức (Append mode)
         df_res = pd.DataFrame(batch_results)
         df_res.to_csv(OUTPUT_FILE, mode='a', index=False, header=not os.path.exists(OUTPUT_FILE))
         
-        # Dự đoán thời gian (ETA)
+        # Cập nhật ETA
         done = i + len(current_batch)
         elapsed = time.time() - start_time
-        speed = done / elapsed
-        eta = str(timedelta(seconds=int((total - done) / speed)))
-        print(f"✅ Đã xong {done}/{total} | Tốc độ: {speed:.2f} URL/s | ETA: {eta}")
+        avg_speed = done / elapsed
+        eta_seconds = int((total - done) / avg_speed)
+        print(f"🏁 Xong {done}/{total} | Tốc độ: {avg_speed:.2f} URL/s | ETA: {timedelta(seconds=eta_seconds)}")
