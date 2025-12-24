@@ -9,6 +9,7 @@ import random
 from datetime import datetime, timedelta
 from urllib.parse import urlparse
 from playwright.async_api import async_playwright
+from playwright_stealth import stealth_async
 from concurrent.futures import ProcessPoolExecutor
 
 # =========================================================
@@ -19,84 +20,123 @@ OUTPUT_FILE = "Dataset_18_Features_Final.csv"
 LOG_FILE = "detailed_process.log"
 SCREENSHOT_DIR = "debug_screenshots"
 
-NUM_PROCESSES = 2         # Giảm xuống 2 để Kali chạy mượt, tránh lỗi memory
-PAGES_PER_PROCESS = 2     
-TIMEOUT = 70000           
+NUM_PROCESSES = 2         # Kali 8GB nên để 2 để tránh crash Chrome
+PAGES_PER_PROCESS = 2     # Mỗi cửa sổ mở 2 tab
+TIMEOUT = 80000           # 80s để đợi Cloudflare giải mã JS
 
 if not os.path.exists(SCREENSHOT_DIR):
     os.makedirs(SCREENSHOT_DIR)
 
 # =========================================================
-# 2. HÀM TRÍCH XUẤT & PHÂN TÍCH LỖI
+# 2. HÀM TRÍCH XUẤT STATIC (8 Features)
 # =========================================================
-
 def calculate_entropy(text):
     if not text: return 0
     p_x = [float(text.count(chr(x))) / len(text) for x in range(256) if text.count(chr(x)) > 0]
     return -sum(p * math.log(p, 2) for p in p_x)
 
 def extract_static(url):
-    parsed = urlparse(url)
-    domain = parsed.netloc.lower()
-    return {
-        'domainEntropy': calculate_entropy(domain),
-        'V23_Entropy_Subdomain': calculate_entropy(domain.split('.')[0]),
-        'hasIp': 1 if re.match(r'\d+\.\d+\.\d+\.\d+', domain) else 0,
-        'numHypRatio': domain.count('-') / len(domain) if len(domain) > 0 else 0,
-        'domainLength': len(domain),
-        'Subdomain_Level': domain.count('.'),
-        'IsHTTPS': 1 if url.startswith('https') else 0
-    }
+    try:
+        parsed = urlparse(url)
+        domain = parsed.netloc.lower()
+        subdomain = domain.split('.')[0]
+        return {
+            'domainEntropy': calculate_entropy(domain),
+            'V23_Entropy_Subdomain': calculate_entropy(subdomain),
+            'hasIp': 1 if re.match(r'\d+\.\d+\.\d+\.\d+', domain) else 0,
+            'numHypRatio': domain.count('-') / len(domain) if len(domain) > 0 else 0,
+            'domainLength': len(domain),
+            'Subdomain_Level': domain.count('.'),
+            'IsHTTPS': 1 if url.startswith('https') else 0,
+            'URL_Depth': url.count('/') - 2
+        }
+    except:
+        return {f: 0 for f in ['domainEntropy', 'V23_Entropy_Subdomain', 'hasIp', 'numHypRatio', 'domainLength', 'Subdomain_Level', 'IsHTTPS', 'URL_Depth']}
 
+# =========================================================
+# 3. HÀM TRÍCH XUẤT ĐỘNG & VƯỢT CHẶN (10 Features)
+# =========================================================
 async def process_url(url, label, context, semaphore, log_file):
     static_data = extract_static(url)
+    # Khởi tạo giá trị mặc định (0.5 để trung lập nếu failed)
     dynamic_data = {f: 0.5 for f in ['Outlink_Ratio', 'HasExternalFormSubmit', 'HasPasswordField', 'DomainTitleMatchScore', 
-                                    'HasSocialNet', 'HasCopyrightInfo', 'HasDescription', 'V9_Has_Hidden_IFrame']}
+                                    'HasSocialNet', 'HasCopyrightInfo', 'HasDescription', 'V9_Has_Hidden_IFrame', 
+                                    'V5_TLS_Issuer_Reputation', 'V4_DNS_Volatility_Count']}
     status = "FAILED"
     reason = "UNKNOWN"
 
     async with semaphore:
         page = await context.new_page()
-        # Fake WebDriver (Cơ bản)
-        await page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+        # Kích hoạt tàng hình (Bypass navigator.webdriver, WebGL, etc.)
+        await stealth_async(page)
         
         try:
-            # 1. Thử truy cập
-            response = await page.goto(url, timeout=TIMEOUT, wait_until="load") # Đổi sang 'load' cho bền
-            
-            # Đợi một chút để các script chống bot chạy xong
-            await asyncio.sleep(random.uniform(3, 5))
-            
-            content = (await page.content()).lower()
-            title = (await page.title()) or "No Title"
+            # Bypass CF bằng cách giả lập traffic từ mạng xã hội
+            await page.set_extra_http_headers({
+                "Referer": "https://www.google.com/",
+                "Accept-Language": "en-US,en;q=0.9"
+            })
 
-            # PHÂN TÍCH CHẶN
-            if response.status in [403, 429]:
-                reason = f"Blocked: HTTP {response.status}"
-                if "cloudflare" in content: reason = "Cloudflare WAF"
-            elif "just a moment" in title.lower():
-                reason = "Cloudflare Challenge"
+            # Truy cập trang
+            response = await page.goto(url, timeout=TIMEOUT, wait_until="domcontentloaded")
+            
+            # --- CƠ CHẾ TỰ ĐỘNG VƯỢT CLOUDFLARE ---
+            await asyncio.sleep(random.uniform(5, 8)) # Đợi giải mã JS
+            await page.mouse.move(random.randint(100, 500), random.randint(100, 500)) # Di chuyển chuột
+            await page.mouse.wheel(0, 500) # Cuộn trang
+
+            content = (await page.content()).lower()
+            title = (await page.title()) or ""
+            
+            # Kiểm tra nếu vẫn kẹt ở trang chờ
+            if "just a moment" in title.lower() or "checking your browser" in content:
+                await asyncio.sleep(10) # Kiên nhẫn đợi thêm 10s
+                title = await page.title()
+
+            if "access denied" in content:
+                reason = "Cloudflare IP Blocked"
             else:
-                # TRÍCH XUẤT KHI THÀNH CÔNG
+                # --- TRÍCH XUẤT DỮ LIỆU ---
                 domain = urlparse(url).netloc.lower()
-                v9 = 1 if any(not await f.frame_element().is_visible() for f in page.frames[1:] if f.frame_element()) else 0
-                links = await page.query_selector_all('a')
-                ext_l = sum(1 for l in links if 'http' in (await l.get_attribute('href') or '') and domain not in (await l.get_attribute('href') or ''))
                 
+                # Sửa lỗi 'async_generator' bằng cách duyệt list trực tiếp
+                v9_val = 0
+                all_frames = page.frames
+                for f in all_frames[1:]:
+                    try:
+                        f_el = await f.frame_element()
+                        if f_el and not await f_el.is_visible():
+                            v9_val = 1; break
+                    except: continue
+
+                links = await page.query_selector_all('a')
+                ext_l = 0
+                for l in links[:50]: # Giới hạn check 50 link để tránh treo
+                    try:
+                        h = await l.get_attribute('href')
+                        if h and 'http' in h and domain not in h: ext_l += 1
+                    except: continue
+
                 dynamic_data.update({
                     'Outlink_Ratio': ext_l / len(links) if links else 0,
-                    'V9_Has_Hidden_IFrame': v9,
-                    'DomainTitleMatchScore': 1 if domain.split('.')[0] in title.lower() else 0,
+                    'HasExternalFormSubmit': 1 if await page.query_selector('form[action^="http"]') else 0,
                     'HasPasswordField': 1 if await page.query_selector('input[type="password"]') else 0,
+                    'DomainTitleMatchScore': 1 if domain.split('.')[0] in title.lower() else 0,
+                    'HasSocialNet': 1 if any(s in content for s in ['facebook', 'twitter', 'instagram', 'linkedin']) else 0,
+                    'HasCopyrightInfo': 1 if '©' in content or 'copyright' in content else 0,
+                    'HasDescription': 1 if await page.query_selector('meta[name="description"]') else 0,
+                    'V9_Has_Hidden_IFrame': v9_val,
+                    'V5_TLS_Issuer_Reputation': 1 if url.startswith('https') else 0,
+                    'V4_DNS_Volatility_Count': 0 # Đặc trưng này cần tách thread DNS riêng
                 })
                 status = "SUCCESS"
-                reason = f"Title: {title[:15]}"
+                reason = f"T: {title[:15]}"
 
         except Exception as e:
             reason = str(e).split('\n')[0][:40]
-            # CHỤP ẢNH KHI LỖI (Quan trọng nhất để debug)
-            clean_url = re.sub(r'\W+', '_', url)[:30]
-            await page.screenshot(path=f"{SCREENSHOT_DIR}/{clean_url}.png")
+            # Chụp ảnh lỗi để check Cloudflare/Captcha
+            clean_name = re.sub(r'\W+', '_', url)[:25]
+            await page.screenshot(path=f"{SCREENSHOT_DIR}/{clean_name}.png")
         finally:
             await page.close()
             
@@ -106,38 +146,34 @@ async def process_url(url, label, context, semaphore, log_file):
     return {**static_data, **dynamic_data, 'URL': url, 'label': label}
 
 # =========================================================
-# 3. RUNNER (Cấu hình "Bất tử" cho Linux)
+# 4. QUẢN LÝ ĐA LUỒNG & TRÌNH DUYỆT
 # =========================================================
-
 async def run_batch(df_batch, process_id):
     async with async_playwright() as p:
-        # ÉP CHROME CHẠY TRÊN KALI (SỬA LỖI FAILED HẾT)
         browser = await p.chromium.launch(headless=False, args=[
-            '--no-sandbox',
+            '--no-sandbox', 
             '--disable-setuid-sandbox',
-            '--disable-dev-shm-usage',
-            '--disable-blink-features=AutomationControlled',
-            '--disable-gpu'
+            '--disable-blink-features=AutomationControlled'
         ])
-        context = await browser.new_context(user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/122.0.0.0")
+        context = await browser.new_context(
+            viewport={'width': 1280, 'height': 800},
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        )
         semaphore = asyncio.Semaphore(PAGES_PER_PROCESS)
-        
         tasks = [process_url(row['URL'], row['label'], context, semaphore, LOG_FILE) for _, row in df_batch.iterrows()]
         results = await asyncio.gather(*tasks)
-        
         await browser.close()
         return results
 
 def process_entry(df_batch, process_id):
-    return asyncio.run(run_batch(df_batch, process_id))
-
-# =========================================================
-# 4. EXECUTION
-# =========================================================
+    try:
+        return asyncio.run(run_batch(df_batch, process_id))
+    except: return []
 
 if __name__ == "__main__":
     start_time = time.time()
-    if not os.path.exists(INPUT_FILE): exit()
+    if not os.path.exists(INPUT_FILE):
+        print(f"❌ Không thấy file {INPUT_FILE}"); exit()
 
     df_all = pd.read_csv(INPUT_FILE)
     processed_urls = set()
@@ -149,23 +185,23 @@ if __name__ == "__main__":
 
     df_todo = df_all[~df_all['URL'].isin(processed_urls)]
     total = len(df_todo)
-    print(f"🚀 Chạy {total} URL. Kiểm tra screenshot trong folder '{SCREENSHOT_DIR}' nếu lỗi.")
+    print(f"🚀 Bắt đầu cào {total} URL với {NUM_PROCESSES} luồng tàng hình...")
 
-    batch_size = NUM_PROCESSES * 5
+    batch_size = NUM_PROCESSES * 10
     for i in range(0, total, batch_size):
         current_batch = df_todo.iloc[i : i + batch_size]
-        sub_batches = np.array_split(current_batch, NUM_PROCESSES)
+        sub_batches = [b for b in np.array_split(current_batch, NUM_PROCESSES) if not b.empty]
         
         with ProcessPoolExecutor(max_workers=NUM_PROCESSES) as executor:
             futures = [executor.submit(process_entry, sub_batches[p], p) for p in range(len(sub_batches))]
             batch_results = []
-            for fut in futures:
-                batch_results.extend(fut.result())
+            for fut in futures: batch_results.extend(fut.result())
         
-        pd.DataFrame(batch_results).to_csv(OUTPUT_FILE, mode='a', index=False, header=not os.path.exists(OUTPUT_FILE))
-        
-        # ETA
-        done = i + len(current_batch)
-        elapsed = time.time() - start_time
-        speed = done / elapsed
-        print(f"🏁 {done}/{total} | Tốc độ: {speed:.2f} URL/s | ETA: {timedelta(seconds=int((total-done)/speed))}")
+        if batch_results:
+            df_res = pd.DataFrame(batch_results)
+            df_res.to_csv(OUTPUT_FILE, mode='a', index=False, header=not os.path.exists(OUTPUT_FILE))
+            
+            done = i + len(current_batch)
+            speed = done / (time.time() - start_time)
+            eta = str(timedelta(seconds=int((total - done) / speed))) if speed > 0 else "N/A"
+            print(f"✅ Xong {done}/{total} | Tốc độ: {speed:.2f} URL/s | ETA: {eta}")
