@@ -1,4 +1,3 @@
-cat << 'EOF' > /home/kali/phishing_extractor/trichxuat18.py
 import pandas as pd
 import numpy as np
 import math
@@ -9,8 +8,17 @@ import time
 import random
 from urllib.parse import urlparse
 from playwright.async_api import async_playwright
-from playwright_stealth import stealth_async
-
+try:
+    from playwright_stealth import stealth
+except ImportError:
+    try:
+        from playwright_stealth.stealth import stealth
+    except ImportError:
+        try:
+            from playwright_stealth.stealth import Stealth as stealth
+        except ImportError:
+            stealth = None
+            print("⚠️ Cảnh báo: Không thể nạp thư viện stealth, sẽ chạy không có ẩn danh.")
 # =========================================================
 # CẤU HÌNH HỆ THỐNG
 # =========================================================
@@ -66,8 +74,7 @@ async def intercept_route(route):
     if route.request.resource_type in ["image", "media", "font"]:
         await route.abort()
     else:
-        await route.continue()
-
+        await route.continue_()
 # =========================================================
 # LOGIC TRÍCH XUẤT CHÍNH (SỬA LỖI DÒNG 70)
 # =========================================================
@@ -83,7 +90,7 @@ async def extract_dynamic(url, label, context, semaphore, log_handle):
 
     async with semaphore:
         page = await context.new_page()
-        await stealth_async(page) 
+        await stealth(page) 
         await page.route("**/*", intercept_route)
         
         try:
@@ -146,7 +153,7 @@ async def main():
         return
 
     df_all = pd.read_csv(INPUT_FILE)
-    df_to_do = df_all[~df_all['url'].isin(processed_urls)]
+    df_to_do = df_all[~df_all['URL'].isin(processed_urls)]
     
     print(f"🚀 Còn lại: {len(df_to_do)} URL")
 
@@ -159,7 +166,7 @@ async def main():
         with open(LOG_FILE, 'a') as log_handle:
             tasks = []
             for i, (idx, row) in enumerate(df_to_do.iterrows()):
-                tasks.append(extract_dynamic(row['url'], row['label'], context, semaphore, log_handle))
+                tasks.append(extract_dynamic(row['URL'], row['label'], context, semaphore, log_handle))
                 
                 if len(tasks) >= CONCURRENT_PAGES or i == len(df_to_do) - 1:
                     results = await asyncio.gather(*tasks)
@@ -174,4 +181,3 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-EOF
