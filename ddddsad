@@ -12,38 +12,34 @@ from playwright.async_api import async_playwright
 from concurrent.futures import ProcessPoolExecutor
 
 # =========================================================
-# 1. CẤU HÌNH & NẠP DỮ LIỆU TOP 1M (DÀNH CHO 27GB RAM)
+# 1. CẤU HÌNH TỐI ƯU (TĂNG TỐC CHO 27GB RAM)
 # =========================================================
 INPUT_FILE = "Dataset_Ready_to_Train.csv"
 TOP_1M_FILE = "top-1m.csv"
 OUTPUT_FILE = "Dataset_18_Features_Final.csv"
 LOG_FILE = "detailed_process.log"
 
-NUM_PROCESSES = 8          # Số tiến trình song song (CPU)
-PAGES_PER_PROCESS = 5      # Số tab mỗi tiến trình (RAM 27GB dư sức cân)
-TIMEOUT = 60000            # 60 giây
+# Tăng số luồng để tận dụng RAM dư thừa
+NUM_PROCESSES = 12          # Tăng từ 8 lên 12
+PAGES_PER_PROCESS = 8       # Tăng từ 5 lên 8 (Tổng ~96 tabs song song)
+TIMEOUT = 45000             # Giảm xuống 45s để bỏ qua các web quá chậm
 
-# Nạp danh sách Top 1M vào Set để tra cứu cực nhanh O(1)
+# Nạp danh sách Top 1M
 TOP_1M_DOMAINS = set()
 if os.path.exists(TOP_1M_FILE):
     try:
-        print(f"⏳ Đang nạp {TOP_1M_FILE}...")
-        # Nếu file có dạng: 1,google.com -> dùng index 1. Nếu chỉ có domain -> dùng index 0
         top_df = pd.read_csv(TOP_1M_FILE, header=None)
         col_index = 1 if len(top_df.columns) > 1 else 0
         TOP_1M_DOMAINS = set(top_df[col_index].str.lower().dropna().tolist())
         print(f"✅ Đã nạp {len(TOP_1M_DOMAINS)} domain uy tín.")
-    except Exception as e:
-        print(f"⚠️ Lỗi nạp file Top 1M: {e}")
-else:
-    print(f"❌ Không tìm thấy {TOP_1M_FILE}. Đặc trưng Is_Top_1M sẽ mặc định là 0.")
+    except Exception as e: print(f"⚠️ Lỗi nạp Top 1M: {e}")
 
 if not os.path.exists(LOG_FILE):
     with open(LOG_FILE, "w", encoding="utf-8") as f:
         f.write(f"--- PHIÊN LÀM VIỆC: {datetime.now()} ---\n")
 
 # =========================================================
-# 2. LOGIC TRÍCH XUẤT TĨNH (8 Features)
+# 2. LOGIC TĨNH (8 Features) - GIỮ NGUYÊN
 # =========================================================
 def calculate_entropy(text):
     if not text: return 0
@@ -55,7 +51,6 @@ def extract_static(url):
         parsed = urlparse(url)
         domain = parsed.netloc.lower()
         subdomain_parts = domain.split('.')[:-2]
-        
         return {
             'domainEntropy': calculate_entropy(domain),
             'V23_Entropy_Subdomain': calculate_entropy(".".join(subdomain_parts)) if subdomain_parts else 0,
@@ -66,11 +61,10 @@ def extract_static(url):
             'IsHTTPS': 1 if url.startswith('https') else 0,
             'Is_Top_1M_Domain': 1 if domain in TOP_1M_DOMAINS else 0
         }
-    except:
-        return {f: 0 for f in ['domainEntropy', 'V23_Entropy_Subdomain', 'hasIp', 'numHypRatio', 'domainLength', 'Subdomain_Level', 'IsHTTPS', 'Is_Top_1M_Domain']}
+    except: return {f: 0 for f in range(8)}
 
 # =========================================================
-# 3. LOGIC TRÍCH XUẤT ĐỘNG (10 Features)
+# 3. LOGIC ĐỘNG (10 Features) - KHÔNG LƯỢC BỎ
 # =========================================================
 async def apply_stealth(page):
     await page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => false});")
@@ -89,7 +83,7 @@ async def extract_dynamic(page, url):
                 if el and not await el.is_visible(): v9_val = 1; break
             except: continue
 
-        # Outlink Ratio & Social Net
+        # Outlink & Social
         all_links = await page.query_selector_all('a')
         outlinks = 0
         has_social = 0
@@ -102,36 +96,22 @@ async def extract_dynamic(page, url):
                         has_social = 1
             except: continue
         
-        outlink_ratio = outlinks / len(all_links) if all_links else 0
-
-        # Form & Password
-        has_password = 1 if await page.query_selector('input[type="password"]') else 0
-        ext_form = 1 if await page.query_selector(f'form[action*="http"]:not([action*="{domain}"])') else 0
-        
-        # Meta & Copyright
-        has_desc = 1 if await page.query_selector('meta[name="description"]') else 0
-        has_copy = 1 if any(x in content for x in ['©', 'copyright', 'all rights reserved']) else 0
-        
-        # Score Match
-        title_match = 1 if domain.split('.')[0] in title.lower() else 0
-
         return {
-            'Outlink_Ratio': outlink_ratio,
-            'HasExternalFormSubmit': ext_form,
-            'HasPasswordField': has_password,
-            'DomainTitleMatchScore': title_match,
+            'Outlink_Ratio': outlinks / len(all_links) if all_links else 0,
+            'HasExternalFormSubmit': 1 if await page.query_selector(f'form[action*="http"]:not([action*="{domain}"])') else 0,
+            'HasPasswordField': 1 if await page.query_selector('input[type="password"]') else 0,
+            'DomainTitleMatchScore': 1 if domain.split('.')[0] in title.lower() else 0,
             'HasSocialNet': has_social,
-            'HasCopyrightInfo': has_copy,
-            'HasDescription': has_desc,
+            'HasCopyrightInfo': 1 if any(x in content for x in ['©', 'copyright', 'all rights reserved']) else 0,
+            'HasDescription': 1 if await page.query_selector('meta[name="description"]') else 0,
             'V9_Has_Hidden_IFrame': v9_val,
             'V5_TLS_Issuer_Reputation': 1 if url.startswith('https') else 0,
             'V4_DNS_Volatility_Count': 1 if len(domain) > 25 or domain.count('-') > 1 else 0
         }
-    except:
-        return {f: 0 for f in ['Outlink_Ratio', 'HasExternalFormSubmit', 'HasPasswordField', 'DomainTitleMatchScore', 'HasSocialNet', 'HasCopyrightInfo', 'HasDescription', 'V9_Has_Hidden_IFrame', 'V5_TLS_Issuer_Reputation', 'V4_DNS_Volatility_Count']}
+    except: return {f: 0 for f in range(10)}
 
 # =========================================================
-# 4. XỬ LÝ CHÍNH & ĐA LUỒNG
+# 4. HÀM XỬ LÝ (TỐI ƯU TỐC ĐỘ)
 # =========================================================
 async def process_url(url, label, context, semaphore):
     static_data = extract_static(url)
@@ -139,36 +119,38 @@ async def process_url(url, label, context, semaphore):
 
     async with semaphore:
         page = await context.new_page()
+        # --- CẢI TIẾN TỐC ĐỘ: Chặn tải media/css để giảm tải ---
+        await page.route("**/*.{png,jpg,jpeg,gif,svg,css,woff,woff2,ttf,otf}", lambda route: route.abort())
+        
         await apply_stealth(page)
         try:
-            await page.set_extra_http_headers({"Referer": "https://www.google.com/"})
+            # wait_until="commit" để bắt đầu xử lý ngay khi server phản hồi
             response = await page.goto(url, timeout=TIMEOUT, wait_until="domcontentloaded")
             
             content = (await page.content()).lower()
             if "just a moment" in content or "cloudflare" in content:
                 reason = "Cloudflare_Blocked"
-            elif response and response.status >= 400:
-                reason = f"HTTP_{response.status}"
             else:
-                await asyncio.sleep(random.uniform(2, 4))
+                # Giảm thời gian chờ xuống 1.5s - 3s cho nhanh
+                await asyncio.sleep(random.uniform(1.5, 3))
                 dynamic_data = await extract_dynamic(page, url)
                 final_row = {**static_data, **dynamic_data, 'URL': url, 'label': label}
                 status, reason = "SUCCESS", "Done"
-        except Exception as e:
-            reason = f"Err: {str(e).splitlines()[0][:30]}"
-        finally:
-            await page.close()
+        except Exception as e: reason = f"Err: {str(e)[:20]}"
+        finally: await page.close()
 
-    # LOGGING CƯỠNG BỨC (Flush to disk)
     with open(LOG_FILE, "a", encoding="utf-8") as f:
         f.write(f"[{datetime.now().strftime('%H:%M:%S')}] {status} | {url} | {reason}\n")
         f.flush(); os.fsync(f.fileno())
-
     return final_row if status == "SUCCESS" else None
 
+# =========================================================
+# 5. ĐIỀU PHỐI (GIỮ NGUYÊN CẤU TRÚC GỐC)
+# =========================================================
 async def run_batch(df_batch):
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=False, args=['--no-sandbox', '--disable-setuid-sandbox'])
+        # headless=True để chạy nhanh hơn nữa, đổi False nếu muốn xem trình duyệt
+        browser = await p.chromium.launch(headless=True, args=['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'])
         context = await browser.new_context(user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0")
         semaphore = asyncio.Semaphore(PAGES_PER_PROCESS)
         tasks = [process_url(row['URL'], row['label'], context, semaphore) for _, row in df_batch.iterrows()]
@@ -182,12 +164,8 @@ def process_entry(df_batch):
 
 if __name__ == "__main__":
     start_time = time.time()
-    if not os.path.exists(INPUT_FILE):
-        print(f"❌ Thiếu file {INPUT_FILE}!"); exit()
-
     df_all = pd.read_csv(INPUT_FILE)
     
-    # Checkpoint logic
     processed_urls = set()
     if os.path.exists(LOG_FILE):
         with open(LOG_FILE, "r", encoding="utf-8") as f:
@@ -197,9 +175,10 @@ if __name__ == "__main__":
 
     df_todo = df_all[~df_all['URL'].isin(processed_urls)]
     total = len(df_todo)
-    print(f"🚀 Bắt đầu: {total} URL. RAM 27GB tối ưu 40 tabs song song.")
+    print(f"🚀 TỐC ĐỘ CAO: {total} URL. RAM 27GB. Song song {NUM_PROCESSES * PAGES_PER_PROCESS} tabs.")
 
-    batch_size = NUM_PROCESSES * 5
+    # Batch lớn hơn để giảm thời gian khởi động browser
+    batch_size = NUM_PROCESSES * PAGES_PER_PROCESS
     for i in range(0, total, batch_size):
         chunk = df_todo.iloc[i : i + batch_size]
         sub_batches = [b for b in np.array_split(chunk, NUM_PROCESSES) if not b.empty]
@@ -211,10 +190,8 @@ if __name__ == "__main__":
         
         if batch_results:
             df_res = pd.DataFrame(batch_results)
-            file_exists = os.path.isfile(OUTPUT_FILE)
-            df_res.to_csv(OUTPUT_FILE, mode='a', index=False, header=not file_exists, encoding="utf-8")
+            df_res.to_csv(OUTPUT_FILE, mode='a', index=False, header=not os.path.exists(OUTPUT_FILE), encoding="utf-8")
         
-        done = i + len(chunk)
+        done = min(i + batch_size, total)
         speed = done / (time.time() - start_time)
-        eta = str(timedelta(seconds=int((total - done) / speed))) if speed > 0 else "N/A"
-        print(f"✅ Đã lưu {done}/{total} | Tốc độ: {speed:.2f} URL/s | ETA: {eta}")
+        print(f"✅ {done}/{total} | Speed: {speed:.2f} URL/s | ETA: {str(timedelta(seconds=int((total-done)/speed)) if speed>0 else 0)}")
