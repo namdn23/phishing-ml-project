@@ -5,6 +5,7 @@ import re
 import asyncio
 import os
 import time
+import gc
 import random
 from datetime import datetime, timedelta
 from urllib.parse import urlparse
@@ -12,33 +13,34 @@ from playwright.async_api import async_playwright
 from concurrent.futures import ProcessPoolExecutor
 
 # =========================================================
-# 1. CẤU HÌNH TỐI ƯU (CHỐNG TREO CHO 27GB RAM)
+# 1. CẤU HÌNH & DANH SÁCH USER-AGENTS (VƯỢT CHẶN)
 # =========================================================
 INPUT_FILE = "Dataset_Ready_to_Train.csv"
 TOP_1M_FILE = "top-1m.csv"
 OUTPUT_FILE = "Dataset_18_Features_Final.csv"
 LOG_FILE = "detailed_process.log"
 
-# Cấu hình song song tối ưu cho RAM 27GB
-NUM_PROCESSES = 10          
-PAGES_PER_PROCESS = 6       # Tổng cộng 60 tab chạy cùng lúc
-TIMEOUT_MS = 30000          # Đợi tối đa 30s cho mỗi trang
+NUM_PROCESSES = 20          
+PAGES_PER_PROCESS = 10       
+TIMEOUT_MS = 60000
 
-# Nạp danh sách Top 1M để trích xuất đặc trưng 'Is_Top_1M_Domain'
+USER_AGENTS = [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:123.0) Gecko/20100101 Firefox/123.0"
+]
+
 TOP_1M_DOMAINS = set()
 if os.path.exists(TOP_1M_FILE):
     try:
         top_df = pd.read_csv(TOP_1M_FILE, header=None)
-        col_index = 1 if len(top_df.columns) > 1 else 0
-        TOP_1M_DOMAINS = set(top_df[col_index].str.lower().dropna().tolist())
+        col = 1 if len(top_df.columns) > 1 else 0
+        TOP_1M_DOMAINS = set(top_df[col].str.lower().dropna().tolist())
     except: pass
 
-if not os.path.exists(LOG_FILE):
-    with open(LOG_FILE, "w", encoding="utf-8") as f:
-        f.write(f"--- PHIÊN LÀM VIỆC: {datetime.now()} ---\n")
-
 # =========================================================
-# 2. LOGIC TĨNH (8 Features) - ĐẦY ĐỦ 100%
+# 2. LOGIC 18 FEATURES (GIỮ NGUYÊN 100%)
 # =========================================================
 def calculate_entropy(text):
     if not text: return 0
@@ -49,40 +51,30 @@ def extract_static(url):
     try:
         parsed = urlparse(url)
         domain = parsed.netloc.lower()
-        subdomain_parts = domain.split('.')[:-2]
+        sub = domain.split('.')[:-2]
         return {
             'domainEntropy': calculate_entropy(domain),
-            'V23_Entropy_Subdomain': calculate_entropy(".".join(subdomain_parts)) if subdomain_parts else 0,
+            'V23_Entropy_Subdomain': calculate_entropy(".".join(sub)) if sub else 0,
             'hasIp': 1 if re.match(r'^\d{1,3}(\.\d{1,3}){3}$', domain) else 0,
             'numHypRatio': domain.count('-') / len(domain) if len(domain) > 0 else 0,
             'domainLength': len(domain),
-            'Subdomain_Level': len(subdomain_parts),
+            'Subdomain_Level': len(sub),
             'IsHTTPS': 1 if url.startswith('https') else 0,
             'Is_Top_1M_Domain': 1 if domain in TOP_1M_DOMAINS else 0
         }
-    except: return {f: 0 for f in ['domainEntropy', 'V23_Entropy_Subdomain', 'hasIp', 'numHypRatio', 'domainLength', 'Subdomain_Level', 'IsHTTPS', 'Is_Top_1M_Domain']}
-
-# =========================================================
-# 3. LOGIC ĐỘNG (10 Features) - ĐẦY ĐỦ 100%
-# =========================================================
-async def apply_stealth(page):
-    await page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => false});")
+    except: return {f: 0 for f in range(8)}
 
 async def extract_dynamic(page, url):
     domain = urlparse(url).netloc.lower()
     try:
         content = (await page.content()).lower()
         title = (await page.title()) or ""
-        
-        # 1. V9: Hidden IFrame
         v9_val = 0
         for f in page.frames[1:]:
             try:
                 el = await f.frame_element()
                 if el and not await el.is_visible(): v9_val = 1; break
             except: continue
-
-        # 2. Outlink Ratio & 3. Social Net
         all_links = await page.query_selector_all('a')
         outlinks, has_social = 0, 0
         for link in all_links:
@@ -93,7 +85,6 @@ async def extract_dynamic(page, url):
                     if any(s in href for s in ['facebook.com', 'twitter.com', 'linkedin.com', 'instagram.com', 'youtube.com']):
                         has_social = 1
             except: continue
-        
         return {
             'Outlink_Ratio': outlinks / len(all_links) if all_links else 0,
             'HasExternalFormSubmit': 1 if await page.query_selector(f'form[action*="http"]:not([action*="{domain}"])') else 0,
@@ -106,85 +97,94 @@ async def extract_dynamic(page, url):
             'V5_TLS_Issuer_Reputation': 1 if url.startswith('https') else 0,
             'V4_DNS_Volatility_Count': 1 if len(domain) > 25 or domain.count('-') > 1 else 0
         }
-    except: return {f: 0 for f in ['Outlink_Ratio', 'HasExternalFormSubmit', 'HasPasswordField', 'DomainTitleMatchScore', 'HasSocialNet', 'HasCopyrightInfo', 'HasDescription', 'V9_Has_Hidden_IFrame', 'V5_TLS_Issuer_Reputation', 'V4_DNS_Volatility_Count']}
+    except: return {f: 0 for f in range(10)}
 
 # =========================================================
-# 4. HÀM XỬ LÝ URL (CHỐNG TREO & CHẶN RÁC)
+# 3. HÀM XỬ LÝ (VƯỢT CHẶN NÂNG CAO)
 # =========================================================
-async def process_url(url, label, context, semaphore):
+async def process_url(url, label, context, semaphore, tab_idx):
     static_data = extract_static(url)
-    status, reason, final_row = "FAILED", "UNKNOWN", {}
+    await asyncio.sleep(tab_idx * 0.4) # Tăng giãn cách lên 0.4s cho an toàn mạng
 
     async with semaphore:
+        # Mỗi tab có một viewport (độ phân giải) khác nhau để tránh fingerprinting
         page = await context.new_page()
-        # CHẶN MEDIA ĐỂ GIẢM TẢI CPU/RAM TUYỆT ĐỐI -> CHỐNG ĐỨNG MÁY
-        await page.route("**/*.{png,jpg,jpeg,gif,svg,css,woff,woff2,ttf,otf,pdf,zip}", lambda route: route.abort())
+        await page.set_viewport_size({"width": random.randint(1280, 1920), "height": random.randint(720, 1080)})
         
-        await apply_stealth(page)
+        # Vượt chặn navigator.webdriver
+        await page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => false});")
+        
+        await page.route("**/*.{png,jpg,jpeg,gif,svg,css,woff,woff2,ttf,otf,pdf,zip,mp4,js.map,json}", lambda r: r.abort())
+        
+        status, reason, final_row = "FAILED", "Timeout", None
         try:
-            # wait_until="domcontentloaded" để xử lý ngay khi có cấu trúc HTML
             await page.goto(url, timeout=TIMEOUT_MS, wait_until="domcontentloaded")
-            await asyncio.sleep(2) # Chờ script ẩn nạp
+            await asyncio.sleep(random.uniform(2, 4)) # Nghỉ ngẫu nhiên giống người thật
             dynamic_data = await extract_dynamic(page, url)
             final_row = {**static_data, **dynamic_data, 'URL': url, 'label': label}
             status, reason = "SUCCESS", "Done"
         except Exception as e:
-            reason = f"Timeout/Err: {str(e)[:20]}"
+            reason = f"Err: {str(e)[:15]}"
         finally:
             await page.close()
 
-    # Log ngay lập tức để checkpoint
-    with open(LOG_FILE, "a", encoding="utf-8") as f:
+    with open(LOG_FILE, "a") as f:
         f.write(f"[{datetime.now().strftime('%H:%M:%S')}] {status} | {url} | {reason}\n")
-        f.flush(); os.fsync(f.fileno())
-    return final_row if status == "SUCCESS" else None
+    return final_row
 
-# =========================================================
-# 5. ĐIỀU PHỐI (BATCH PROCESSING)
-# =========================================================
-async def run_batch(df_batch):
+async def run_batch(df_batch, start_offset):
     async with async_playwright() as p:
-        # headless=True chạy ngầm giúp tiết kiệm RAM cực lớn
-        browser = await p.chromium.launch(headless=True, args=['--no-sandbox', '--disable-dev-shm-usage'])
-        context = await browser.new_context(user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/122.0.0.0")
+        browser = await p.chromium.launch(headless=True, args=[
+            '--no-sandbox', 
+            '--disable-dev-shm-usage',
+            '--disable-blink-features=AutomationControlled', # Vượt chặn bot detection
+            '--disable-infobars'
+        ])
+        # Sử dụng ngẫu nhiên User-Agent cho mỗi cụm Process
+        context = await browser.new_context(user_agent=random.choice(USER_AGENTS))
+        
         semaphore = asyncio.Semaphore(PAGES_PER_PROCESS)
-        tasks = [process_url(row['URL'], row['label'], context, semaphore) for _, row in df_batch.iterrows()]
+        tasks = [process_url(row['URL'], row['label'], context, semaphore, start_offset + i) 
+                 for i, (_, row) in enumerate(df_batch.iterrows())]
+        
         results = await asyncio.gather(*tasks)
         await browser.close()
         return [r for r in results if r is not None]
 
-def process_entry(df_batch):
-    try: return asyncio.run(run_batch(df_batch))
-    except: return []
+def process_entry(data_tuple):
+    df_batch, start_offset = data_tuple
+    try: return asyncio.run(run_batch(df_batch, start_offset))
+    finally: gc.collect()
 
 # =========================================================
-# 6. CHƯƠNG TRÌNH CHÍNH + TÍNH ETA
+# 4. CHƯƠNG TRÌNH CHÍNH + ETA (HOÀN CHỈNH)
 # =========================================================
 if __name__ == "__main__":
     start_session_time = time.time()
-    if not os.path.exists(INPUT_FILE):
-        print(f"❌ Không tìm thấy file {INPUT_FILE}!"); exit()
+    if not os.path.exists(INPUT_FILE): exit("❌ Thiếu file đầu vào!")
 
     df_all = pd.read_csv(INPUT_FILE)
-    
-    # Đọc checkpoint từ log
     processed_urls = set()
     if os.path.exists(LOG_FILE):
-        with open(LOG_FILE, "r", encoding="utf-8") as f:
+        with open(LOG_FILE, "r") as f:
             for line in f:
                 parts = line.split(" | ")
                 if len(parts) > 1: processed_urls.add(parts[1].strip())
 
     df_todo = df_all[~df_all['URL'].isin(processed_urls)]
     total_todo = len(df_todo)
-    print(f"🚀 KHỞI CHẠY: {total_todo} URL còn lại. Đang chạy ngầm tiết kiệm tài nguyên...")
+    print(f"🚀 KHỞI CHẠY: {total_todo} URL | 200 Tabs (Ultra Stealth) | RAM 27GB")
 
     batch_size = NUM_PROCESSES * PAGES_PER_PROCESS
-    processed_count = 0
-
     for i in range(0, total_todo, batch_size):
         chunk = df_todo.iloc[i : i + batch_size]
-        sub_batches = [b for b in np.array_split(chunk, NUM_PROCESSES) if not b.empty]
+        sub_batches = []
+        split_data = np.array_split(chunk, NUM_PROCESSES)
+        offset = 0
+        for s in split_data:
+            if not s.empty:
+                sub_batches.append((s, offset))
+                offset += len(s)
         
         with ProcessPoolExecutor(max_workers=NUM_PROCESSES) as executor:
             batch_results = []
@@ -192,18 +192,15 @@ if __name__ == "__main__":
                 batch_results.extend(res)
         
         if batch_results:
-            df_res = pd.DataFrame(batch_results)
-            df_res.to_csv(OUTPUT_FILE, mode='a', index=False, header=not os.path.exists(OUTPUT_FILE), encoding="utf-8")
+            pd.DataFrame(batch_results).to_csv(OUTPUT_FILE, mode='a', index=False, header=not os.path.exists(OUTPUT_FILE))
         
-        # Cập nhật tốc độ và Dự đoán thời gian (ETA)
-        processed_count += len(chunk)
-        elapsed = time.time() - start_session_time
-        speed = processed_count / elapsed # URL/s
+        # Dọn dẹp cache Kali Linux
+        if os.name == 'posix': os.system('sync; echo 3 | sudo tee /proc/sys/vm/drop_caches > /dev/null')
         
-        remaining = total_todo - processed_count
-        eta_sec = remaining / speed if speed > 0 else 0
-        eta_str = str(timedelta(seconds=int(eta_sec)))
+        done = min(i + batch_size, total_todo)
+        speed = done / (time.time() - start_session_time)
+        eta = str(timedelta(seconds=int((total_todo - done) / speed))) if speed > 0 else "0"
         
-        print(f"✅ Xong: {processed_count}/{total_todo} | Tốc độ: {speed:.2f} URL/s | Còn lại khoảng: {eta_str}")
+        print(f"✅ Tiến độ: {done}/{total_todo} | Speed: {speed:.2f} URL/s | ETA: {eta}")
 
-    print(f"🏁 HOÀN THÀNH! Tổng thời gian: {str(timedelta(seconds=int(time.time() - start_session_time)))}")
+    print(f"🏁 XONG! Tổng thời gian: {str(timedelta(seconds=int(time.time() - start_session_time)))}")
