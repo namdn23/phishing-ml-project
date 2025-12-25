@@ -6,6 +6,7 @@ import asyncio
 import os
 import requests
 import io
+import csv
 from urllib.parse import urlparse
 from playwright.async_api import async_playwright
 from concurrent.futures import ProcessPoolExecutor
@@ -13,11 +14,11 @@ from concurrent.futures import ProcessPoolExecutor
 # ================= CONFIGURATION =================
 URLHAUS_URL = "https://urlhaus.abuse.ch/downloads/csv_online/"
 OUTPUT_FILE = "Phishing_URLHaus_24F.csv"
-NUM_PROCESSES = 6       # Số nhân CPU trên Linux của ông
-LIMIT_URLS = 15000      # Số lượng URL muốn trích xuất
-TIMEOUT_MS = 35000      # Thời gian chờ mỗi trang
+NUM_PROCESSES = 6       
+LIMIT_URLS = 15000      
+TIMEOUT_MS = 35000      
+SAVE_INTERVAL = 50  # Cứ 50 mẫu thì lưu checkpoint một lần
 
-# Danh sách 24 cột chuẩn để gộp data sau này
 COLUMNS = [
     'URL', 'NoOfDegitsInURL', 'IsHTTPS', 'DomainTitleMatchScore', 'HasDescription', 
     'HasExternalFormSubmit', 'HasSocialNet', 'HasSubmitButton', 'HasPasswordField', 
@@ -38,19 +39,15 @@ async def get_features(page, url):
     try:
         await page.goto(url, timeout=TIMEOUT_MS, wait_until="domcontentloaded")
         await asyncio.sleep(1.5)
-        
         content = (await page.content()).lower()
         title = (await page.title()) or ""
         parsed = urlparse(url)
         domain = parsed.netloc.lower()
         visible_text = await page.inner_text("body")
 
-        # Features
         digits = sum(c.isdigit() for c in url)
         is_https = 1 if url.startswith('https') else 0
-        domain_match = 1 if domain.split('.')[0] in title.lower() else 0
         
-        # Form Submit External logic
         ext_form = 0
         forms = await page.query_selector_all('form')
         for form in forms:
@@ -60,7 +57,7 @@ async def get_features(page, url):
 
         return {
             'URL': url, 'NoOfDegitsInURL': digits, 'IsHTTPS': is_https,
-            'DomainTitleMatchScore': domain_match,
+            'DomainTitleMatchScore': 1 if domain.split('.')[0] in title.lower() else 0,
             'HasDescription': 1 if await page.query_selector('meta[name="description"]') else 0,
             'HasExternalFormSubmit': ext_form,
             'HasSocialNet': 1 if any(s in content for s in ['facebook.com', 'twitter.com', 'instagram.com']) else 0,
@@ -75,7 +72,7 @@ async def get_features(page, url):
             'V5_TLS_Issuer_Reputation': is_https, 'V4_DNS_Volatility_Count': 0,
             'Is_Top_1M_Domain': 0, 'V22_IP_Subdomain_Pattern': 1 if re.match(r'\d+\.\d+\.\d+', domain) else 0,
             'V23_Entropy_Subdomain': calculate_entropy(domain.split('.')[0]),
-            'Trust_Score': domain_match * is_https, 'Digit_Ratio': digits / len(url) if len(url) > 0 else 0
+            'Trust_Score': is_https, 'Digit_Ratio': digits / len(url) if len(url) > 0 else 0
         }
     except: return None
 
@@ -84,15 +81,21 @@ async def worker(urls, proc_id):
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True, args=['--no-sandbox'])
         context = await browser.new_context(user_agent="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36")
+        
         for i, url in enumerate(urls):
             page = await context.new_page()
             data = await get_features(page, url)
             if data:
                 results.append(data)
-                print(f"[P{proc_id}] ✅ ({i+1}/{len(urls)})")
+                # Checkpoint nội bộ mỗi worker
+                if len(results) >= SAVE_INTERVAL:
+                    pd.DataFrame(results).to_csv(OUTPUT_FILE, mode='a', header=not os.path.exists(OUTPUT_FILE), index=False)
+                    results = []
+                print(f"✅ [P{proc_id}] Progress: {i+1}/{len(urls)} | Found: {url[:30]}")
             else:
-                print(f"[P{proc_id}] ❌ ({i+1}/{len(urls)})")
+                print(f"❌ [P{proc_id}] Fail: {url[:30]}")
             await page.close()
+        
         await browser.close()
     return results
 
@@ -100,29 +103,51 @@ def start_process(urls, proc_id):
     return asyncio.run(worker(urls, proc_id))
 
 if __name__ == "__main__":
-    # 1. Tải và xử lý URLHaus CSV
-    print("📥 Đang kết nối URLHaus...")
+    # 1. Kiểm tra Checkpoint cũ
+    processed_urls = set()
+    if os.path.exists(OUTPUT_FILE):
+        try:
+            old_df = pd.read_csv(OUTPUT_FILE)
+            processed_urls = set(old_df['URL'].tolist())
+            print(f"🔄 Đã tìm thấy file cũ. Bỏ qua {len(processed_urls)} URL đã trích xuất.")
+        except: pass
+
+    # 2. Tải URL mới
+    print("📥 Đang tải URL từ URLHaus...")
     res = requests.get(URLHAUS_URL, timeout=30)
-    # URLHaus dùng dấu # cho comment, ta skip 8 dòng đầu hoặc dùng comment='#'
-    df_raw = pd.read_csv(io.StringIO(res.text), comment='#', 
-                         names=['id', 'dateadded', 'url', 'url_status', 'last_online', 'threat', 'tags', 'urlhaus_link', 'reporter'],
-                         quoting=3)
+    f = io.StringIO(res.text)
+    reader = csv.reader(f)
     
-    # Lọc các URL đang Online để đảm bảo lấy được đặc trưng động
-    phish_urls = df_raw[df_raw['url_status'] == 'online']['url'].head(LIMIT_URLS).tolist()
-    print(f"📦 Đã tìm thấy {len(phish_urls)} URL đang hoạt động.")
+    phish_urls = []
+    for row in reader:
+        if not row or row[0].startswith('#'): continue
+        try:
+            url_val = row[2]
+            if row[3] == 'online' and url_val not in processed_urls:
+                phish_urls.append(url_val)
+        except: continue
+        if len(phish_urls) >= LIMIT_URLS: break
 
-    # 2. Đa luồng trích xuất
-    chunks = np.array_split(phish_urls, NUM_PROCESSES)
-    final_data = []
-    with ProcessPoolExecutor(max_workers=NUM_PROCESSES) as executor:
-        futures = [executor.submit(start_process, chunks[i].tolist(), i) for i in range(NUM_PROCESSES)]
-        for f in futures:
-            final_data.extend(f.result())
+    print(f"📦 Số lượng URL cần chạy mới: {len(phish_urls)}")
 
-    # 3. Lưu kết quả chuẩn hóa
-    df_final = pd.DataFrame(final_data)
-    if not df_final.empty:
-        df_final = df_final[COLUMNS]
+    # 3. Chạy đa luồng
+    if phish_urls:
+        chunks = np.array_split(phish_urls, NUM_PROCESSES)
+        final_temp = []
+        with ProcessPoolExecutor(max_workers=NUM_PROCESSES) as executor:
+            futures = [executor.submit(start_process, chunks[i].tolist(), i) for i in range(NUM_PROCESSES)]
+            for f in futures:
+                final_temp.extend(f.result())
+        
+        # Lưu nốt phần còn lại
+        if final_temp:
+            pd.DataFrame(final_temp).to_csv(OUTPUT_FILE, mode='a', header=not os.path.exists(OUTPUT_FILE), index=False)
+
+    # 4. Dọn dẹp cuối cùng (Sắp xếp lại cột và xóa trùng)
+    if os.path.exists(OUTPUT_FILE):
+        df_final = pd.read_csv(OUTPUT_FILE)
+        df_final.drop_duplicates(subset=['URL'], inplace=True)
+        # Lọc đúng các cột yêu cầu (nếu có cột rác phát sinh)
+        df_final = df_final[[c for c in COLUMNS if c in df_final.columns]]
         df_final.to_csv(OUTPUT_FILE, index=False)
-        print(f"🏁 Hoàn thành! File lưu tại: {OUTPUT_FILE}")
+        print(f"🏁 TỔNG KẾT: Đã thu hoạch được {len(df_final)} mẫu Phishing.")
