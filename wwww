@@ -8,55 +8,60 @@ import requests
 import io
 import csv
 import time
+import gc
 from urllib.parse import urlparse
 from playwright.async_api import async_playwright
 from concurrent.futures import ProcessPoolExecutor
 
-# ================= CONFIGURATION =================
+# ================= CẤU HÌNH TỐI ƯU (27GB RAM) =================
 URLHAUS_URL = "https://urlhaus.abuse.ch/downloads/csv_online/"
 OUTPUT_FILE = "Phishing_Web_24F_Final.csv"
-NUM_PROCESSES = 12       # 27GB RAM chạy 12-15 luồng cực mượt
-LIMIT_URLS = 15000      
-TIMEOUT_MS = 40000      
-SAVE_INTERVAL = 30  
+LIMIT_URLS = 15000          
 
-FILE_BLACKLIST = ('.exe', '.bin', '.dll', '.msi', '.apk', '.zip', '.rar', '.7z', '.tmp', '.lin', '.sh', '.bat', '.iso', '.dmg', '.gz', '.i', '.dat')
+NUM_PROCESSES = 10           # Số nhân CPU xử lý (tăng/giảm tùy CPU)
+CONCURRENT_PER_PROC = 5      # Số tab mở cùng lúc trong mỗi nhân
+RESTART_BROWSER_EVERY = 100  # Cực kỳ quan trọng để giải phóng RAM
+TIMEOUT_MS = 30000           # 30 giây cho mỗi trang
 
-COLUMNS = [
-    'URL', 'NoOfDegitsInURL', 'IsHTTPS', 'DomainTitleMatchScore', 'HasDescription', 
-    'HasExternalFormSubmit', 'HasSocialNet', 'HasSubmitButton', 'HasPasswordField', 
-    'HasCopyrightInfo', 'label', 'V1_PHash_Distance', 'V2_Layout_Similarity', 
-    'V6_JS_Entropy', 'V7_Text_Readability_Score', 'V8_Total_IFrames', 
-    'V9_Has_Hidden_IFrame', 'V5_TLS_Issuer_Reputation', 'V4_DNS_Volatility_Count', 
-    'Is_Top_1M_Domain', 'V22_IP_Subdomain_Pattern', 'V23_Entropy_Subdomain', 
-    'Trust_Score', 'Digit_Ratio'
-]
+# Danh sách đuôi file không phải web (tránh tải file độc hại về máy)
+FILE_BLACKLIST = ('.exe', '.bin', '.dll', '.msi', '.apk', '.zip', '.rar', '.7z', '.tmp', 
+                  '.lin', '.sh', '.bat', '.iso', '.dmg', '.gz', '.i', '.dat', '.pdf', '.txt')
 
-# ================= LOGIC TRÍCH XUẤT CHUẨN =================
+# ================= CÁC HÀM BỔ TRỢ =================
 def calculate_entropy(text):
-    if not text: return 0
+    if not text or len(text) == 0: return 0
     prob = [float(text.count(c)) / len(text) for c in dict.fromkeys(list(text))]
     return -sum(p * math.log(p, 2) for p in prob)
 
-async def get_features(page, url):
+async def get_features(context, url):
+    """Hàm trích xuất đặc trưng với cơ chế chống chặn nâng cao"""
+    page = await context.new_page()
+    data = None
     try:
-        # Chống chặn: Giả lập hành vi thật
+        # 1. VƯỢT CHẶN: Giả lập vân tay trình duyệt thật
         await page.set_extra_http_headers({
             "Accept-Language": "en-US,en;q=0.9",
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8"
+            "Referer": "https://www.google.com/"
         })
 
-        # Chỉ tải Script và HTML, bỏ qua rác để nhanh
-        await page.route("**/*.{png,jpg,jpeg,gif,svg,css,woff,otf}", lambda route: route.abort())
+        # 2. TĂNG TỐC: Chặn tải các tài nguyên tốn RAM/Băng thông
+        await page.route("**/*", lambda route: 
+            route.abort() if route.request.resource_type in ["image", "media", "font", "stylesheet"] 
+            else route.continue_()
+        )
 
-        # GOTO với cơ chế đợi thông minh
-        response = await page.goto(url, timeout=TIMEOUT_MS, wait_until="networkidle")
+        # 3. TRUY CẬP: Dùng domcontentloaded để lấy dữ liệu nhanh nhất
+        response = await page.goto(url, timeout=TIMEOUT_MS, wait_until="domcontentloaded")
         
-        # Kiểm tra nếu là web (tránh link tải file ngầm)
+        # Kiểm tra nếu không phải HTML (ví dụ link tải file ẩn) thì bỏ qua
         ctype = response.headers.get('content-type', '').lower()
-        if 'text/html' not in ctype: return None
+        if 'text/html' not in ctype:
+            await page.close()
+            return None
 
-        await asyncio.sleep(2) # Đợi thêm 2s cho JS lừa đảo render
+        # 4. GIẢ LẬP NGƯỜI DÙNG: Cuộn nhẹ trang để kích hoạt JS/Iframe ngầm
+        await page.mouse.wheel(0, 500)
+        await asyncio.sleep(2) # Đợi JS render
 
         content = (await page.content()).lower()
         title = (await page.title()) or ""
@@ -66,10 +71,10 @@ async def get_features(page, url):
         digits = sum(c.isdigit() for c in url)
         is_https = 1 if url.startswith('https') else 0
 
-        # Trích xuất 24 đặc trưng
-        return {
-            'URL': url, 
-            'NoOfDegitsInURL': digits, 
+        # Trích xuất 24 đặc trưng (Features)
+        data = {
+            'URL': url,
+            'NoOfDegitsInURL': digits,
             'IsHTTPS': is_https,
             'DomainTitleMatchScore': 1 if domain.split('.')[0] in title.lower() and len(title) > 0 else 0,
             'HasDescription': 1 if await page.query_selector('meta[name="description"]') else 0,
@@ -78,88 +83,110 @@ async def get_features(page, url):
             'HasSubmitButton': 1 if await page.query_selector('input[type="submit"], button[type="submit"], button') else 0,
             'HasPasswordField': 1 if await page.query_selector('input[type="password"]') else 0,
             'HasCopyrightInfo': 1 if '©' in content or 'copyright' in content else 0,
-            'label': 1, 
-            'V1_PHash_Distance': 0, 'V2_Layout_Similarity': 0,
+            'label': 1,
+            'V1_PHash_Distance': 0, 
+            'V2_Layout_Similarity': 0,
             'V6_JS_Entropy': calculate_entropy(content),
             'V7_Text_Readability_Score': len(visible_text.split()) / 400 if visible_text else 0,
             'V8_Total_IFrames': len(await page.query_selector_all('iframe')),
             'V9_Has_Hidden_IFrame': 1 if await page.query_selector('iframe[style*="display:none"]') else 0,
-            'V5_TLS_Issuer_Reputation': is_https, 
-            'V4_DNS_Volatility_Count': 0, 'Is_Top_1M_Domain': 0, 
+            'V5_TLS_Issuer_Reputation': is_https,
+            'V4_DNS_Volatility_Count': 0, 
+            'Is_Top_1M_Domain': 0,
             'V22_IP_Subdomain_Pattern': 1 if re.match(r'\d+\.\d+\.\d+', domain) else 0,
             'V23_Entropy_Subdomain': calculate_entropy(domain.split('.')[0]),
-            'Trust_Score': is_https, 
+            'Trust_Score': is_https,
             'Digit_Ratio': digits / len(url) if len(url) > 0 else 0
         }
-    except: return None
+    except Exception:
+        pass # Bỏ qua các link chết (timeout, nxdomain, v.v.)
+    finally:
+        await page.close() # Giải phóng RAM của tab ngay lập tức
+        return data
 
 async def worker(urls, proc_id):
-    results = []
-    start_worker_time = time.time()
-    async with async_playwright() as p:
-        # CHỐNG CHẶN: Thêm args stealth
-        browser = await p.chromium.launch(headless=True, args=[
-            '--no-sandbox', 
-            '--disable-blink-features=AutomationControlled',
-            '--disable-infobars'
-        ])
-        context = await browser.new_context(
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36"
-        )
-        
-        for i, url in enumerate(urls):
-            page = await context.new_page()
-            data = await get_features(page, url)
-            
-            if data:
-                results.append(data)
-                if len(results) >= SAVE_INTERVAL:
-                    pd.DataFrame(results).to_csv(OUTPUT_FILE, mode='a', header=not os.path.exists(OUTPUT_FILE), index=False)
-                    results = []
+    """Quản lý vòng đời trình duyệt và giải phóng bộ nhớ hệ thống"""
+    # Chia nhỏ danh sách URL để khởi động lại browser định kỳ
+    url_chunks = [urls[i:i + RESTART_BROWSER_EVERY] for i in range(0, len(urls), RESTART_BROWSER_EVERY)]
+    
+    for chunk in url_chunks:
+        async with async_playwright() as p:
+            # Khởi động trình duyệt với các cờ (flags) ẩn bot
+            browser = await p.chromium.launch(headless=True, args=[
+                '--no-sandbox', 
+                '--disable-dev-shm-usage', # Tránh tràn bộ nhớ đệm Linux/Docker
+                '--disable-blink-features=AutomationControlled' # Vượt chặn Navigator.webdriver
+            ])
+            context = await browser.new_context(
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            )
+
+            results = []
+            for i in range(0, len(chunk), CONCURRENT_PER_PROC):
+                batch = chunk[i : i + CONCURRENT_PER_PROC]
+                tasks = [get_features(context, url) for url in batch]
                 
-                # Tính toán thời gian
-                elapsed = time.time() - start_worker_time
-                speed = (i + 1) / elapsed # URLs per second
-                rem_urls = len(urls) - (i + 1)
-                rem_time = rem_urls / speed if speed > 0 else 0
-                print(f"✅ [P{proc_id}] Xong {i+1}/{len(urls)} | Còn khoảng: {rem_time/60:.1f} phút")
-            else:
-                print(f"⏩ [P{proc_id}] Bỏ qua (Link chết/File): {url[:30]}")
-            
-            await page.close()
-        await browser.close()
+                # Chạy song song nhiều tab (concurrency)
+                batch_results = await asyncio.gather(*tasks)
+                
+                for res in batch_results:
+                    if res: results.append(res)
+
+                # Lưu vào file CSV sau mỗi batch thành công
+                if results:
+                    df = pd.DataFrame(results)
+                    df.to_csv(OUTPUT_FILE, mode='a', header=not os.path.exists(OUTPUT_FILE), index=False)
+                    results = []
+
+                print(f"✔️ [P{proc_id}] Xử lý: {i + len(batch)}/{len(chunk)}")
+
+            await browser.close()
+        
+        # Buộc Python giải phóng rác trong RAM sau khi đóng Browser
+        gc.collect()
+        print(f"🧹 [P{proc_id}] Đã khởi động lại trình duyệt để làm sạch RAM.")
 
 def start_process(urls, proc_id):
-    return asyncio.run(worker(urls, proc_id))
+    """Điểm kích hoạt cho đa tiến trình"""
+    asyncio.run(worker(urls, proc_id))
 
+# ================= CHƯƠNG TRÌNH CHÍNH =================
 if __name__ == "__main__":
-    # --- LOGIC CHECKPOINT ---
+    # 1. ĐỌC CHECKPOINT: Không cào lại những URL đã có
     processed_urls = set()
     if os.path.exists(OUTPUT_FILE):
         try:
-            old_df = pd.read_csv(OUTPUT_FILE)
-            processed_urls = set(old_df['URL'].tolist())
-            print(f"🔄 Checkpoint: Đã có {len(processed_urls)} mẫu. Tiếp tục cào...")
+            old_df = pd.read_csv(OUTPUT_FILE, usecols=['URL'])
+            processed_urls = set(old_df['URL'].astype(str).tolist())
+            print(f"🔄 Đã tìm thấy {len(processed_urls)} mẫu cũ. Đang lọc URL mới...")
         except: pass
 
-    # --- TẢI DATA ---
-    print("📥 Đang tải URLHaus...")
-    res = requests.get(URLHAUS_URL, timeout=30)
-    reader = csv.reader(io.StringIO(res.text))
-    
-    phish_urls = []
-    for row in reader:
-        if len(row) > 3 and row[3] == 'online':
-            url = row[2]
-            if not url.lower().endswith(FILE_BLACKLIST) and url not in processed_urls:
-                phish_urls.append(url)
-        if len(phish_urls) >= LIMIT_URLS: break
+    # 2. TẢI DỮ LIỆU: Lấy danh sách URL độc hại mới nhất
+    print("📥 Đang tải URLHaus Online List...")
+    try:
+        res = requests.get(URLHAUS_URL, timeout=30)
+        reader = csv.reader(io.StringIO(res.text))
+        phish_urls = []
+        for row in reader:
+            if len(row) > 3 and row[3] == 'online':
+                url = row[2]
+                # Kiểm tra blacklist file và trùng lặp
+                if not url.lower().endswith(FILE_BLACKLIST) and url not in processed_urls:
+                    phish_urls.append(url)
+            if len(phish_urls) >= LIMIT_URLS: break
+    except Exception as e:
+        print(f"❌ Lỗi tải dữ liệu: {e}")
+        exit()
 
-    # --- CHẠY ĐA LUỒNG ---
-    print(f"🚀 Tổng cộng {len(phish_urls)} URL. Chạy trên {NUM_PROCESSES} luồng...")
-    if phish_urls:
+    # 3. THỰC THI: Chia việc cho các nhân CPU
+    total = len(phish_urls)
+    if total > 0:
+        print(f"🚀 Bắt đầu quét {total} URL với 10 Process x 5 Tab...")
         chunks = np.array_split(phish_urls, NUM_PROCESSES)
         with ProcessPoolExecutor(max_workers=NUM_PROCESSES) as executor:
-            [executor.submit(start_process, chunks[i].tolist(), i) for i in range(NUM_PROCESSES)]
+            for i in range(NUM_PROCESSES):
+                executor.submit(start_process, chunks[i].tolist(), i)
+    else:
+        print("🎉 Không có URL mới nào cần xử lý!")
 
-    print(f"🏁 TẤT CẢ ĐÃ XONG! Kết quả tại: {OUTPUT_FILE}")
+    print(f"🏁 TẤT CẢ ĐÃ XONG! File lưu tại: {OUTPUT_FILE}")
