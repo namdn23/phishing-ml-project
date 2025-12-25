@@ -755,7 +755,7 @@ def main():
     import argparse
     
     parser = argparse.ArgumentParser(description='Feature Extraction v33 - 26 Features')
-    parser.add_argument('--input', default='Dataset_v32_Final.csv', help='Input CSV')
+    parser.add_argument('--input', default='Dataset_Ready_to_Train.csv', help='Input CSV')
     parser.add_argument('--output', default='Dataset_v33_Final.csv', help='Output CSV')
     parser.add_argument('--sample', type=int, help='Test với N URLs')
     parser.add_argument('--skip-dynamic', action='store_true', help='Chỉ extract static (14 features)')
