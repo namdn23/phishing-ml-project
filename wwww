@@ -7,23 +7,20 @@ import os
 import requests
 import io
 import csv
+import time
 from urllib.parse import urlparse
 from playwright.async_api import async_playwright
 from concurrent.futures import ProcessPoolExecutor
 
 # ================= CONFIGURATION =================
 URLHAUS_URL = "https://urlhaus.abuse.ch/downloads/csv_online/"
-OUTPUT_FILE = "Phishing_Web_24F.csv"
-NUM_PROCESSES = 6       
+OUTPUT_FILE = "Phishing_Web_24F_Final.csv"
+NUM_PROCESSES = 12       # 27GB RAM chạy 12-15 luồng cực mượt
 LIMIT_URLS = 15000      
-TIMEOUT_MS = 35000      
-SAVE_INTERVAL = 50  # Checkpoint mỗi 50 mẫu thành công
+TIMEOUT_MS = 40000      
+SAVE_INTERVAL = 30  
 
-# Danh sách đuôi file cần loại bỏ để tập trung vào trang web
-FILE_BLACKLIST = (
-    '.exe', '.bin', '.dll', '.msi', '.apk', '.zip', '.rar', '.7z', 
-    '.tmp', '.lin', '.sh', '.bat', '.iso', '.dmg', '.gz', '.i', '.dat'
-)
+FILE_BLACKLIST = ('.exe', '.bin', '.dll', '.msi', '.apk', '.zip', '.rar', '.7z', '.tmp', '.lin', '.sh', '.bat', '.iso', '.dmg', '.gz', '.i', '.dat')
 
 COLUMNS = [
     'URL', 'NoOfDegitsInURL', 'IsHTTPS', 'DomainTitleMatchScore', 'HasDescription', 
@@ -35,125 +32,134 @@ COLUMNS = [
     'Trust_Score', 'Digit_Ratio'
 ]
 
-# ================= LOGIC TRÍCH XUẤT =================
+# ================= LOGIC TRÍCH XUẤT CHUẨN =================
 def calculate_entropy(text):
-    if not text or len(text) == 0: return 0
+    if not text: return 0
     prob = [float(text.count(c)) / len(text) for c in dict.fromkeys(list(text))]
     return -sum(p * math.log(p, 2) for p in prob)
 
 async def get_features(page, url):
     try:
-        # 1. Truy cập và kiểm tra nếu là Web (text/html)
-        response = await page.goto(url, timeout=TIMEOUT_MS, wait_until="domcontentloaded")
-        ctype = response.headers.get('content-type', '').lower()
-        if 'text/html' not in ctype:
-            return None
+        # Chống chặn: Giả lập hành vi thật
+        await page.set_extra_http_headers({
+            "Accept-Language": "en-US,en;q=0.9",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8"
+        })
 
-        await asyncio.sleep(1.5)
+        # Chỉ tải Script và HTML, bỏ qua rác để nhanh
+        await page.route("**/*.{png,jpg,jpeg,gif,svg,css,woff,otf}", lambda route: route.abort())
+
+        # GOTO với cơ chế đợi thông minh
+        response = await page.goto(url, timeout=TIMEOUT_MS, wait_until="networkidle")
+        
+        # Kiểm tra nếu là web (tránh link tải file ngầm)
+        ctype = response.headers.get('content-type', '').lower()
+        if 'text/html' not in ctype: return None
+
+        await asyncio.sleep(2) # Đợi thêm 2s cho JS lừa đảo render
+
         content = (await page.content()).lower()
         title = (await page.title()) or ""
-        parsed = urlparse(url)
-        domain = parsed.netloc.lower()
-        visible_text = await page.inner_text("body")
-
+        domain = urlparse(url).netloc.lower()
+        visible_text = await page.evaluate("() => document.body.innerText")
+        
         digits = sum(c.isdigit() for c in url)
         is_https = 1 if url.startswith('https') else 0
-        
-        # Kiểm tra Form submit ra ngoài
-        ext_form = 0
-        forms = await page.query_selector_all('form')
-        for form in forms:
-            action = await form.get_attribute('action')
-            if action and action.startswith('http') and domain not in action:
-                ext_form = 1; break
 
+        # Trích xuất 24 đặc trưng
         return {
-            'URL': url, 'NoOfDegitsInURL': digits, 'IsHTTPS': is_https,
-            'DomainTitleMatchScore': 1 if domain.split('.')[0] in title.lower() else 0,
+            'URL': url, 
+            'NoOfDegitsInURL': digits, 
+            'IsHTTPS': is_https,
+            'DomainTitleMatchScore': 1 if domain.split('.')[0] in title.lower() and len(title) > 0 else 0,
             'HasDescription': 1 if await page.query_selector('meta[name="description"]') else 0,
-            'HasExternalFormSubmit': ext_form,
+            'HasExternalFormSubmit': 1 if await page.query_selector('form[action^="http"]') else 0,
             'HasSocialNet': 1 if any(s in content for s in ['facebook.com', 'twitter.com', 'instagram.com']) else 0,
-            'HasSubmitButton': 1 if await page.query_selector('input[type="submit"], button[type="submit"]') else 0,
+            'HasSubmitButton': 1 if await page.query_selector('input[type="submit"], button[type="submit"], button') else 0,
             'HasPasswordField': 1 if await page.query_selector('input[type="password"]') else 0,
-            'HasCopyrightInfo': 1 if 'copyright' in content or '©' in content else 0,
-            'label': 1, 'V1_PHash_Distance': 0, 'V2_Layout_Similarity': 0,
+            'HasCopyrightInfo': 1 if '©' in content or 'copyright' in content else 0,
+            'label': 1, 
+            'V1_PHash_Distance': 0, 'V2_Layout_Similarity': 0,
             'V6_JS_Entropy': calculate_entropy(content),
-            'V7_Text_Readability_Score': len(visible_text.split()) / 400,
+            'V7_Text_Readability_Score': len(visible_text.split()) / 400 if visible_text else 0,
             'V8_Total_IFrames': len(await page.query_selector_all('iframe')),
             'V9_Has_Hidden_IFrame': 1 if await page.query_selector('iframe[style*="display:none"]') else 0,
-            'V5_TLS_Issuer_Reputation': is_https, 'V4_DNS_Volatility_Count': 0,
-            'Is_Top_1M_Domain': 0, 'V22_IP_Subdomain_Pattern': 1 if re.match(r'\d+\.\d+\.\d+', domain) else 0,
+            'V5_TLS_Issuer_Reputation': is_https, 
+            'V4_DNS_Volatility_Count': 0, 'Is_Top_1M_Domain': 0, 
+            'V22_IP_Subdomain_Pattern': 1 if re.match(r'\d+\.\d+\.\d+', domain) else 0,
             'V23_Entropy_Subdomain': calculate_entropy(domain.split('.')[0]),
-            'Trust_Score': is_https, 'Digit_Ratio': digits / len(url) if len(url) > 0 else 0
+            'Trust_Score': is_https, 
+            'Digit_Ratio': digits / len(url) if len(url) > 0 else 0
         }
     except: return None
 
 async def worker(urls, proc_id):
     results = []
+    start_worker_time = time.time()
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True, args=['--no-sandbox'])
-        context = await browser.new_context(user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+        # CHỐNG CHẶN: Thêm args stealth
+        browser = await p.chromium.launch(headless=True, args=[
+            '--no-sandbox', 
+            '--disable-blink-features=AutomationControlled',
+            '--disable-infobars'
+        ])
+        context = await browser.new_context(
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36"
+        )
         
         for i, url in enumerate(urls):
             page = await context.new_page()
             data = await get_features(page, url)
+            
             if data:
                 results.append(data)
                 if len(results) >= SAVE_INTERVAL:
                     pd.DataFrame(results).to_csv(OUTPUT_FILE, mode='a', header=not os.path.exists(OUTPUT_FILE), index=False)
                     results = []
-                print(f"✅ [P{proc_id}] Progress: {i+1}/{len(urls)} | Found Web")
+                
+                # Tính toán thời gian
+                elapsed = time.time() - start_worker_time
+                speed = (i + 1) / elapsed # URLs per second
+                rem_urls = len(urls) - (i + 1)
+                rem_time = rem_urls / speed if speed > 0 else 0
+                print(f"✅ [P{proc_id}] Xong {i+1}/{len(urls)} | Còn khoảng: {rem_time/60:.1f} phút")
             else:
-                print(f"⏩ [P{proc_id}] Skip (File/Dead): {url[:30]}")
+                print(f"⏩ [P{proc_id}] Bỏ qua (Link chết/File): {url[:30]}")
+            
             await page.close()
-        
         await browser.close()
-    return results
 
 def start_process(urls, proc_id):
     return asyncio.run(worker(urls, proc_id))
 
 if __name__ == "__main__":
-    # 1. Kiểm tra Checkpoint
+    # --- LOGIC CHECKPOINT ---
     processed_urls = set()
     if os.path.exists(OUTPUT_FILE):
         try:
             old_df = pd.read_csv(OUTPUT_FILE)
             processed_urls = set(old_df['URL'].tolist())
-            print(f"🔄 Checkpoint: Bỏ qua {len(processed_urls)} mẫu đã có.")
+            print(f"🔄 Checkpoint: Đã có {len(processed_urls)} mẫu. Tiếp tục cào...")
         except: pass
 
-    # 2. Tải và lọc Web-only URLs
-    print("📥 Đang tải URLHaus và lọc link WEB...")
+    # --- TẢI DATA ---
+    print("📥 Đang tải URLHaus...")
     res = requests.get(URLHAUS_URL, timeout=30)
     reader = csv.reader(io.StringIO(res.text))
     
     phish_urls = []
     for row in reader:
-        if not row or row[0].startswith('#'): continue
-        try:
-            url_val = row[2]
-            # Lọc Online + Không phải đuôi file + Chưa xử lý
-            if (row[3] == 'online' and 
-                not url_val.lower().endswith(FILE_BLACKLIST) and 
-                url_val not in processed_urls):
-                phish_urls.append(url_val)
-        except: continue
+        if len(row) > 3 and row[3] == 'online':
+            url = row[2]
+            if not url.lower().endswith(FILE_BLACKLIST) and url not in processed_urls:
+                phish_urls.append(url)
         if len(phish_urls) >= LIMIT_URLS: break
 
-    print(f"📦 Số lượng URL trang web cần quét: {len(phish_urls)}")
-
-    # 3. Chạy đa luồng
+    # --- CHẠY ĐA LUỒNG ---
+    print(f"🚀 Tổng cộng {len(phish_urls)} URL. Chạy trên {NUM_PROCESSES} luồng...")
     if phish_urls:
         chunks = np.array_split(phish_urls, NUM_PROCESSES)
         with ProcessPoolExecutor(max_workers=NUM_PROCESSES) as executor:
-            futures = [executor.submit(start_process, chunks[i].tolist(), i) for i in range(NUM_PROCESSES)]
-            [f.result() for f in futures]
+            [executor.submit(start_process, chunks[i].tolist(), i) for i in range(NUM_PROCESSES)]
 
-    # 4. Dọn dẹp & Tổng kết
-    if os.path.exists(OUTPUT_FILE):
-        df_final = pd.read_csv(OUTPUT_FILE)
-        df_final.drop_duplicates(subset=['URL'], inplace=True)
-        df_final = df_final[[c for c in COLUMNS if c in df_final.columns]]
-        df_final.to_csv(OUTPUT_FILE, index=False)
-        print(f"🏁 XONG! Đã thu hoạch tổng cộng {len(df_final)} mẫu Web Phishing.")
+    print(f"🏁 TẤT CẢ ĐÃ XONG! Kết quả tại: {OUTPUT_FILE}")
