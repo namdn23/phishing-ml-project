@@ -1,21 +1,3 @@
-#!/usr/bin/env python3
-"""
-Advanced Feature Extractor v33 - FINAL VERSION
-26 Features + Label theo quyết định cuối cùng
-
-STATIC (14): Is_Top_1M_Domain, Entropy_Subdomain, Is_HTTPS, Subdomain_Count,
-             Has_Phishing_Keyword, Path_Depth, URL_Length, Levenshtein_Brand,
-             Digit_Ratio, Has_IP_Address, Suspicious_TLD, Brand_In_Subdomain,
-             Has_At_Symbol, Special_Char_Ratio, Prefix_Suffix_Domain
-
-DYNAMIC (12): Has_External_Form_Submit, Has_Submit_Button, Has_Password_Field,
-              Total_IFrames, Has_Hidden_IFrame, TLS_Issuer_Reputation,
-              Domain_Age, Certificate_Age, Redirect_Count, Favicon_Match,
-              External_Links_Ratio, Has_Popup
-
-Tối ưu cho Intel Ultra 5H (27GB RAM, 56 workers)
-"""
-
 import pandas as pd
 import numpy as np
 import requests
@@ -81,7 +63,7 @@ rate_limiter = RateLimiter()
 
 # ===================== UTILITY FUNCTIONS =====================
 
-def safe_request(URL, timeout=5, follow_redirects=True):
+def safe_request(url, timeout=5, follow_redirects=True):
     """HTTP request với retry + anti-detection"""
     session = requests.Session()
     
@@ -90,7 +72,7 @@ def safe_request(URL, timeout=5, follow_redirects=True):
             rate_limiter.wait('http', 1.0 / CONFIG['rate_limit']['http'])
             
             response = session.get(
-                URL,
+                url,
                 headers=CONFIG['headers'],
                 timeout=timeout,
                 allow_redirects=follow_redirects,
@@ -103,10 +85,10 @@ def safe_request(URL, timeout=5, follow_redirects=True):
             time.sleep(0.5 * (attempt + 1))
     return None
 
-def extract_domain_parts(URL):
+def extract_domain_parts(url):
     """Parse URL thành các phần"""
     try:
-        parsed = urlparse(URL)
+        parsed = urlparse(url)
         domain = parsed.netloc
         path = parsed.path
         
@@ -126,7 +108,7 @@ def extract_domain_parts(URL):
 
 # ===================== STATIC FEATURE EXTRACTORS (14) =====================
 
-def extract_static_features(URL):
+def extract_static_features(url):
     """
     Trích xuất TẤT CẢ 14 static features
     
@@ -146,13 +128,16 @@ def extract_static_features(URL):
     13. Has_At_Symbol ← THÊM MỚI ⭐⭐⭐⭐⭐
     14. Special_Char_Ratio ← THÊM MỚI ⭐⭐⭐⭐
     15. Prefix_Suffix_Domain ← THÊM MỚI ⭐⭐⭐⭐
+    
+    NOTE: Tất cả return values phải là int hoặc float, KHÔNG PHẢI string!
     """
     features = {}
     
     try:
-        parts = extract_domain_parts(URL)
+        parts = extract_domain_parts(url)
         if not parts:
-            return {k: -1 for k in [
+            # Return int -1, not string "-1"
+            return {k: int(-1) for k in [
                 'Subdomain_Count', 'Has_Phishing_Keyword', 'Path_Depth',
                 'URL_Length', 'Levenshtein_Brand', 'Digit_Ratio',
                 'Entropy_Subdomain', 'Is_HTTPS', 'Has_IP_Address',
@@ -160,14 +145,14 @@ def extract_static_features(URL):
                 'Special_Char_Ratio', 'Prefix_Suffix_Domain'
             ]}
         
-        # 3. Is_HTTPS (từ v32: IsHTTPS)
-        features['Is_HTTPS'] = 1 if parts['scheme'] == 'https' else 0
+        # 3. Is_HTTPS (từ v32: IsHTTPS) - int 0 or 1
+        features['Is_HTTPS'] = int(1 if parts['scheme'] == 'https' else 0)
         
-        # 4. Subdomain_Count
+        # 4. Subdomain_Count - int
         subdomain = parts['subdomain']
-        features['Subdomain_Count'] = subdomain.count('.') + 1 if subdomain else 0
+        features['Subdomain_Count'] = int(subdomain.count('.') + 1 if subdomain else 0)
         
-        # 5. Has_Phishing_Keyword (từ hasKeyword)
+        # 5. Has_Phishing_Keyword (từ hasKeyword) - int 0 or 1
         PHISHING_KEYWORDS = [
             'login', 'signin', 'account', 'verify', 'secure', 'update',
             'bank', 'paypal', 'ebay', 'amazon', 'apple', 'microsoft',
@@ -175,17 +160,17 @@ def extract_static_features(URL):
             'security', 'credential', 'validate', 'auth', 'verification',
             'billing', 'support', 'helpdesk', 'webscr', 'customer'
         ]
-        URL_lower = URL.lower()
-        features['Has_Phishing_Keyword'] = 1 if any(kw in URL_lower for kw in PHISHING_KEYWORDS) else 0
+        url_lower = url.lower()
+        features['Has_Phishing_Keyword'] = int(1 if any(kw in url_lower for kw in PHISHING_KEYWORDS) else 0)
         
-        # 6. Path_Depth
+        # 6. Path_Depth - int
         path = parts['path'].strip('/')
-        features['Path_Depth'] = path.count('/') if path else 0
+        features['Path_Depth'] = int(path.count('/') if path else 0)
         
-        # 7. URL_Length
-        features['URL_Length'] = len(URL)
+        # 7. URL_Length - int
+        features['URL_Length'] = int(len(url))
         
-        # 8. Levenshtein_Brand
+        # 8. Levenshtein_Brand - int
         try:
             from Levenshtein import distance
             
@@ -199,32 +184,32 @@ def extract_static_features(URL):
             
             main_domain = parts['main_domain'].lower()
             distances = [distance(main_domain, brand) for brand in BRANDS]
-            features['Levenshtein_Brand'] = min(distances)
+            features['Levenshtein_Brand'] = int(min(distances))
         except:
             # Fallback: simple character difference
-            features['Levenshtein_Brand'] = 10
+            features['Levenshtein_Brand'] = int(10)
         
-        # 9. Digit_Ratio (thay NoOfDegitsInURL)
-        digits = sum(c.isdigit() for c in URL)
-        features['Digit_Ratio'] = round(digits / len(URL), 4) if len(URL) > 0 else 0
-
-        # 2. Entropy_Subdomain (từ v32: V23_Entropy_Subdomain)
+        # 9. Digit_Ratio (thay NoOfDegitsInURL) - float
+        digits = sum(c.isdigit() for c in url)
+        features['Digit_Ratio'] = float(round(digits / len(url), 4) if len(url) > 0 else 0.0)
+        
+        # 2. Entropy_Subdomain (từ v32: V23_Entropy_Subdomain) - float
         if subdomain:
             char_counts = Counter(subdomain)
             total_chars = len(subdomain)
             entropy = -sum((count/total_chars) * np.log2(count/total_chars) 
                           for count in char_counts.values())
-            features['Entropy_Subdomain'] = round(entropy, 4)
+            features['Entropy_Subdomain'] = float(round(entropy, 4))
         else:
-            features['Entropy_Subdomain'] = 0
+            features['Entropy_Subdomain'] = float(0.0)
         
-        # 10. Has_IP_Address ⭐⭐⭐⭐⭐
+        # 10. Has_IP_Address ⭐⭐⭐⭐⭐ - int 0 or 1
         # Check nếu domain là IP address
         ip_pattern = r'\b(?:\d{1,3}\.){3}\d{1,3}\b'
         has_ip = 1 if re.search(ip_pattern, parts['full_domain']) else 0
-        features['Has_IP_Address'] = has_ip
+        features['Has_IP_Address'] = int(has_ip)
         
-        # 11. Suspicious_TLD ⭐⭐⭐⭐⭐
+        # 11. Suspicious_TLD ⭐⭐⭐⭐⭐ - int 0 or 1
         SUSPICIOUS_TLDS = [
             'tk', 'ml', 'ga', 'cf', 'gq',  # Free TLDs
             'pw', 'cc', 'top', 'xyz', 'club',
@@ -232,9 +217,9 @@ def extract_static_features(URL):
             'bid', 'win', 'faith', 'science', 'party'
         ]
         tld = parts['tld'].lower()
-        features['Suspicious_TLD'] = 1 if tld in SUSPICIOUS_TLDS else 0
+        features['Suspicious_TLD'] = int(1 if tld in SUSPICIOUS_TLDS else 0)
         
-        # 12. Brand_In_Subdomain ⭐⭐⭐⭐⭐
+        # 12. Brand_In_Subdomain ⭐⭐⭐⭐⭐ - int 0 or 1
         # Check nếu subdomain chứa tên brand nổi tiếng (dấu hiệu phishing)
         MAJOR_BRANDS = [
             'paypal', 'amazon', 'microsoft', 'apple', 'google',
@@ -242,26 +227,27 @@ def extract_static_features(URL):
             'login', 'account', 'verify'
         ]
         subdomain_lower = subdomain.lower()
-        features['Brand_In_Subdomain'] = 1 if any(brand in subdomain_lower for brand in MAJOR_BRANDS) else 0
+        features['Brand_In_Subdomain'] = int(1 if any(brand in subdomain_lower for brand in MAJOR_BRANDS) else 0)
         
-        # 13. Has_At_Symbol ⭐⭐⭐⭐⭐
+        # 13. Has_At_Symbol ⭐⭐⭐⭐⭐ - int 0 or 1
         # '@' trong URL có thể dùng để phishing (http://trusted.com@evil.com)
-        features['Has_At_Symbol'] = 1 if '@' in URL else 0
+        features['Has_At_Symbol'] = int(1 if '@' in url else 0)
         
-        # 14. Special_Char_Ratio ⭐⭐⭐⭐
+        # 14. Special_Char_Ratio ⭐⭐⭐⭐ - float
         # Tỷ lệ ký tự đặc biệt (-, _, ~, etc)
-        special_chars = sum(c in '-_~!@#$%^&*()+=[]{}|;:,.<>?/' for c in URL)
-        features['Special_Char_Ratio'] = round(special_chars / len(URL), 4) if len(URL) > 0 else 0
+        special_chars = sum(c in '-_~!@#$%^&*()+=[]{}|;:,.<>?/' for c in url)
+        features['Special_Char_Ratio'] = float(round(special_chars / len(url), 4) if len(url) > 0 else 0.0)
         
-        # 15. Prefix_Suffix_Domain ⭐⭐⭐⭐
+        # 15. Prefix_Suffix_Domain ⭐⭐⭐⭐ - int 0 or 1
         # Check nếu domain có dấu '-' (e.g., paypal-secure.com)
         main_domain = parts['main_domain']
-        features['Prefix_Suffix_Domain'] = 1 if '-' in main_domain else 0
+        features['Prefix_Suffix_Domain'] = int(1 if '-' in main_domain else 0)
         
         return features
         
     except Exception as e:
-        return {k: -1 for k in [
+        # Return int -1 for all on error
+        return {k: int(-1) for k in [
             'Subdomain_Count', 'Has_Phishing_Keyword', 'Path_Depth',
             'URL_Length', 'Levenshtein_Brand', 'Digit_Ratio',
             'Entropy_Subdomain', 'Is_HTTPS', 'Has_IP_Address',
@@ -271,14 +257,14 @@ def extract_static_features(URL):
 
 # ===================== DYNAMIC FEATURE EXTRACTORS (12) =====================
 
-def extract_domain_age(URL):
-    """Domain_Age via WHOIS (từ code mới)"""
+def extract_domain_age(url):
+    """Domain_Age via WHOIS (từ code mới) - Returns int"""
     try:
         rate_limiter.wait('whois', 1.0 / CONFIG['rate_limit']['whois'])
         
-        parts = extract_domain_parts(URL)
+        parts = extract_domain_parts(url)
         if not parts:
-            return -1
+            return int(-1)
         
         domain = parts['full_domain']
         w = whois.whois(domain)
@@ -289,19 +275,19 @@ def extract_domain_age(URL):
         
         if created:
             age_days = (datetime.now() - created).days
-            return max(0, age_days)
-        return -1
+            return int(max(0, age_days))
+        return int(-1)
     except:
-        return -1
+        return int(-1)
 
-def extract_certificate_age(URL):
-    """Certificate_Age via SSL (từ code mới)"""
+def extract_certificate_age(url):
+    """Certificate_Age via SSL (từ code mới) - Returns int"""
     try:
         rate_limiter.wait('ssl', 1.0 / CONFIG['rate_limit']['ssl'])
         
-        parts = extract_domain_parts(URL)
+        parts = extract_domain_parts(url)
         if not parts or parts['scheme'] != 'https':
-            return -1
+            return int(-1)
         
         domain = parts['full_domain']
         
@@ -311,21 +297,21 @@ def extract_certificate_age(URL):
                 cert = ssock.getpeercert()
                 not_before = datetime.strptime(cert['notBefore'], '%b %d %H:%M:%S %Y %Z')
                 age_days = (datetime.now() - not_before).days
-                return max(0, age_days)
+                return int(max(0, age_days))
     except:
-        return -1
+        return int(-1)
 
-def extract_redirect_count(URL):
-    """Redirect_Count (từ code mới)"""
+def extract_redirect_count(url):
+    """Redirect_Count (từ code mới) - Returns int"""
     try:
-        response = safe_request(URL, follow_redirects=True)
+        response = safe_request(url, follow_redirects=True)
         if response:
-            return len(response.history)
-        return -1
+            return int(len(response.history))
+        return int(-1)
     except:
-        return -1
+        return int(-1)
 
-def extract_html_features(URL):
+def extract_html_features(url):
     """
     Trích xuất: Favicon_Match, External_Links_Ratio, Has_Popup,
                 Has_External_Form_Submit, Has_Submit_Button, Has_Password_Field,
@@ -345,13 +331,13 @@ def extract_html_features(URL):
     }
     
     try:
-        response = safe_request(URL, follow_redirects=False)
+        response = safe_request(url, follow_redirects=False)
         if not response or response.status_code != 200:
             return features
         
         html = response.text
         soup = BeautifulSoup(html, 'html.parser')
-        parts = extract_domain_parts(URL)
+        parts = extract_domain_parts(url)
         if not parts:
             return features
         
@@ -431,7 +417,7 @@ def extract_html_features(URL):
     except Exception as e:
         return features
 
-def extract_tls_issuer_reputation(URL):
+def extract_tls_issuer_reputation(url):
     """
     TLS_Issuer_Reputation (từ v32: V5_TLS_Issuer_Reputation)
     1 = Trusted CA, 0 = Unknown/Self-signed, -1 = Error/No HTTPS
@@ -439,7 +425,7 @@ def extract_tls_issuer_reputation(URL):
     try:
         rate_limiter.wait('ssl', 1.0 / CONFIG['rate_limit']['ssl'])
         
-        parts = extract_domain_parts(URL)
+        parts = extract_domain_parts(url)
         if not parts or parts['scheme'] != 'https':
             return -1
         
@@ -468,7 +454,7 @@ def extract_tls_issuer_reputation(URL):
     except:
         return -1
 
-def extract_dynamic_features(URL):
+def extract_dynamic_features(url):
     """
     Trích xuất TẤT CẢ 12 dynamic features
     
@@ -490,20 +476,20 @@ def extract_dynamic_features(URL):
     
     try:
         # HTML features (1 request cho 8 features!)
-        html_features = extract_html_features(URL)
+        html_features = extract_html_features(url)
         features.update(html_features)
         
         # Redirect count
-        features['Redirect_Count'] = extract_redirect_count(URL)
+        features['Redirect_Count'] = extract_redirect_count(url)
         
         # TLS Issuer Reputation
-        features['TLS_Issuer_Reputation'] = extract_tls_issuer_reputation(URL)
+        features['TLS_Issuer_Reputation'] = extract_tls_issuer_reputation(url)
         
         # Domain age (WHOIS - slow)
-        features['Domain_Age'] = extract_domain_age(URL)
+        features['Domain_Age'] = extract_domain_age(url)
         
         # Certificate age (SSL)
-        features['Certificate_Age'] = extract_certificate_age(URL)
+        features['Certificate_Age'] = extract_certificate_age(url)
         
         return features
         
@@ -531,21 +517,32 @@ def extract_all_features(row):
     Input: pandas Series (1 row)
     Output: dict với 26 features + metadata
     """
-    URL = row.get('URL', '')
+    # CRITICAL: Ensure URL is properly extracted
+    if isinstance(row, pd.Series):
+        url = str(row.get('url', ''))
+    elif isinstance(row, dict):
+        url = str(row.get('url', ''))
+    else:
+        url = str(row) if row else ''
+    
+    # Validate URL
+    if not url or url == '' or url == 'nan':
+        print(f"⚠️  WARNING: Empty URL detected in row")
+        url = 'INVALID_URL'
     
     result = {
-        'URL': URL,
+        'url': url,
         'timestamp': datetime.now().isoformat(),
         'status': 'pending'
     }
     
     try:
         # 1. STATIC features (14 features - instant)
-        static = extract_static_features(URL)
+        static = extract_static_features(url)
         result.update(static)
         
         # 2. DYNAMIC features (12 features - slow)
-        dynamic = extract_dynamic_features(URL)
+        dynamic = extract_dynamic_features(url)
         result.update(dynamic)
         
         # 3. Is_Top_1M_Domain (cần load từ v32 hoặc tính toán riêng)
@@ -655,8 +652,13 @@ def process_batch(df, checkpoint_manager, skip_dynamic=False):
     with ThreadPoolExecutor(max_workers=CONFIG['max_workers']) as executor:
         futures = {}
         for idx, row in remaining_df.iterrows():
+            # DEBUG: Log first 3 URLs
+            if idx < 3:
+                url_debug = row.get('url', 'NO_URL_COLUMN') if isinstance(row, pd.Series) else 'NOT_A_SERIES'
+                print(f"🔍 DEBUG Row {idx}: url='{url_debug}' | type={type(row)}")
+            
             if skip_dynamic:
-                future = executor.submit(extract_static_features, row.get('URL', ''))
+                future = executor.submit(extract_static_features, row.get('url', ''))
             else:
                 future = executor.submit(extract_all_features, row)
             futures[future] = (idx, row)
@@ -674,7 +676,7 @@ def process_batch(df, checkpoint_manager, skip_dynamic=False):
                     result = future.result(timeout=60)
                     
                     if skip_dynamic:
-                        result = {'URL': row.get('URL', ''), **result}
+                        result = {'url': row.get('url', ''), **result}
                     
                     results.append(result)
                     processed_indices.add(idx)
@@ -719,9 +721,9 @@ def process_batch(df, checkpoint_manager, skip_dynamic=False):
                 
                 except Exception as e:
                     error_count += 1
-                    print(f"\n❌ Error processing {row.get('URL', 'unknown')}: {e}")
+                    print(f"\n❌ Error processing {row.get('url', 'unknown')}: {e}")
                     results.append({
-                        'URL': row.get('URL', ''),
+                        'url': row.get('url', ''),
                         'status': 'timeout',
                         'error_message': str(e)
                     })
@@ -792,6 +794,37 @@ def main():
     print(f"📂 Loading {args.input}...")
     df = pd.read_csv(args.input)
     print(f"✅ Loaded {len(df)} rows")
+    
+    # CRITICAL FIX: Normalize column names - handle 'URL' vs 'url'
+    print(f"\n🔍 Checking columns...")
+    print(f"   Original columns: {list(df.columns)}")
+    
+    # Check for URL column (case-insensitive)
+    url_col = None
+    for col in df.columns:
+        if col.lower() == 'url':
+            url_col = col
+            break
+    
+    if url_col is None:
+        print(f"\n❌ ERROR: No URL column found!")
+        print(f"   Available columns: {list(df.columns)}")
+        print(f"   Expected: 'url' or 'URL'")
+        return
+    
+    # Rename to lowercase 'url' if needed
+    if url_col != 'url':
+        print(f"   📝 Renaming '{url_col}' → 'url'")
+        df.rename(columns={url_col: 'url'}, inplace=True)
+    
+    # Validate URLs are not empty
+    empty_urls = df['url'].isna().sum()
+    if empty_urls > 0:
+        print(f"   ⚠️  WARNING: {empty_urls} empty URLs detected - will skip")
+        df = df[df['url'].notna()].copy()
+    
+    print(f"   ✅ URL column ready: {len(df)} valid URLs")
+    print(f"   Sample URLs: {df['url'].head(3).tolist()}")
     
     if args.sample:
         df = df.head(args.sample)
@@ -893,22 +926,36 @@ def main():
     # Merge với DataFrame gốc
     print("\n🔗 Merging with original data...")
     
+    # Ensure original df also has lowercase 'url'
+    if 'url' not in df.columns:
+        print("   ⚠️  WARNING: 'url' column missing from original df")
+    
     # Giữ label từ dataset gốc
     if 'label' in df.columns:
-        df_original = df[['URL', 'label']]
+        df_original = df[['url', 'label']].copy()
         
         # Nếu có Is_Top_1M_Domain trong v32, giữ lại
         if 'Is_Top_1M_Domain' in df.columns:
             df_original['Is_Top_1M_Domain'] = df['Is_Top_1M_Domain']
     else:
-        df_original = df[['URL']]
+        df_original = df[['url']].copy()
+    
+    print(f"   Original data: {len(df_original)} rows")
+    print(f"   New features: {len(df_new_features)} rows")
     
     # Merge
-    df_final = df_original.merge(df_new_features, on='URL', how='left')
+    df_final = df_original.merge(df_new_features, on='url', how='left')
+    
+    print(f"   Merged: {len(df_final)} rows")
+    
+    # Check for missing URLs after merge
+    missing_urls = df_final['url'].isna().sum()
+    if missing_urls > 0:
+        print(f"   ⚠️  WARNING: {missing_urls} URLs missing after merge")
     
     # Reorder columns theo thứ tự: Static (14) + Dynamic (12) + label
     column_order = [
-        'URL',
+        'url',
         # STATIC (14)
         'Is_Top_1M_Domain',
         'Entropy_Subdomain',
