@@ -258,27 +258,7 @@ def extract_static_features(url):
 # ===================== DYNAMIC FEATURE EXTRACTORS (12) =====================
 
 def extract_domain_age(url):
-    """Domain_Age via WHOIS (từ code mới) - Returns int"""
-    try:
-        rate_limiter.wait('whois', 1.0 / CONFIG['rate_limit']['whois'])
-        
-        parts = extract_domain_parts(url)
-        if not parts:
-            return int(-1)
-        
-        domain = parts['full_domain']
-        w = whois.whois(domain)
-        
-        created = w.creation_date
-        if isinstance(created, list):
-            created = created[0]
-        
-        if created:
-            age_days = (datetime.now() - created).days
-            return int(max(0, age_days))
-        return int(-1)
-    except:
-        return int(-1)
+   return int(-1)
 
 def extract_certificate_age(url):
     """Certificate_Age via SSL (từ code mới) - Returns int"""
