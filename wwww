@@ -4,178 +4,141 @@ import math
 import re
 import asyncio
 import os
-import time
-import random
-from datetime import datetime, timedelta
+import requests
 from urllib.parse import urlparse
 from playwright.async_api import async_playwright
-from playwright_stealth import stealth # Dùng stealth theo yêu cầu của ông
 from concurrent.futures import ProcessPoolExecutor
 
-# =========================================================
-# 1. CẤU HÌNH HỆ THỐNG
-# =========================================================
-INPUT_FILE = "Dataset_Ready_to_Train.csv"
-OUTPUT_FILE = "Dataset_18_Features_Final.csv"
-LOG_FILE = "detailed_process.log"
-SCREENSHOT_DIR = "debug_screenshots"
+# ================= CONFIGURATION =================
+PHISHTANK_URL = "https://data.phishtank.com/data/online-valid.csv"
+OUTPUT_FILE = "Phishing_Extra_Data_24F.csv"
+NUM_PROCESSES = 6       # Số lượng CPU core muốn dùng
+TIMEOUT_MS = 40000      # 40 giây cho mỗi trang
+LIMIT_URLS = 15000      # Số lượng URL Phishing muốn lấy thêm
 
-NUM_PROCESSES = 2         
-PAGES_PER_PROCESS = 2     
-TIMEOUT = 80000           
-
-if not os.path.exists(SCREENSHOT_DIR):
-    os.makedirs(SCREENSHOT_DIR)
-
-# --- Các hàm static giữ nguyên như cũ ---
+# ================= LOGIC TRÍCH XUẤT =================
 def calculate_entropy(text):
-    if not text: return 0
-    p_x = [float(text.count(chr(x))) / len(text) for x in range(256) if text.count(chr(x)) > 0]
-    return -sum(p * math.log(p, 2) for p in p_x)
+    if not text or len(text) == 0: return 0
+    prob = [float(text.count(c)) / len(text) for c in dict.fromkeys(list(text))]
+    return -sum(p * math.log(p, 2) for p in prob)
 
-def extract_static(url):
+async def get_features(page, url):
     try:
+        # Truy cập URL với timeout
+        await page.goto(url, timeout=TIMEOUT_MS, wait_until="domcontentloaded")
+        await asyncio.sleep(2) # Đợi JS render thêm tí
+        
+        content = (await page.content()).lower()
+        title = (await page.title()) or ""
         parsed = urlparse(url)
         domain = parsed.netloc.lower()
-        return {
-            'domainEntropy': calculate_entropy(domain),
-            'V23_Entropy_Subdomain': calculate_entropy(domain.split('.')[0]),
-            'hasIp': 1 if re.match(r'\d+\.\d+\.\d+\.\d+', domain) else 0,
-            'numHypRatio': domain.count('-') / len(domain) if len(domain) > 0 else 0,
-            'domainLength': len(domain),
-            'Subdomain_Level': domain.count('.'),
-            'IsHTTPS': 1 if url.startswith('https') else 0,
-            'URL_Depth': url.count('/') - 2
-        }
-    except: return {f: 0 for f in range(8)}
+        visible_text = await page.inner_text("body")
 
-# =========================================================
-# 3. HÀM XỬ LÝ CHÍNH (CÓ LOG FLUSH & STEALTH)
-# =========================================================
-async def process_url(url, label, context, semaphore, log_file):
-    static_data = extract_static(url)
-    dynamic_data = {f: 0.5 for f in ['Outlink_Ratio', 'HasExternalFormSubmit', 'HasPasswordField', 'DomainTitleMatchScore', 
-                                    'HasSocialNet', 'HasCopyrightInfo', 'HasDescription', 'V9_Has_Hidden_IFrame', 
-                                    'V5_TLS_Issuer_Reputation', 'V4_DNS_Volatility_Count']}
-    status = "FAILED"
-    reason = "INIT"
-
-    async with semaphore:
-        page = await context.new_page()
-        # Áp dụng stealth cho bản Kali
-        await stealth(page) 
+        # 1. Nhóm Đặc trưng Tĩnh (Static)
+        digits = sum(c.isdigit() for c in url)
+        is_https = 1 if url.startswith('https') else 0
+        digit_ratio = digits / len(url) if len(url) > 0 else 0
         
-        try:
-            await page.set_extra_http_headers({
-                "Referer": "https://www.google.com/",
-                "Accept-Language": "en-US,en;q=0.9"
-            })
+        # 2. Nhóm Đặc trưng Nội dung (Content/Dynamic)
+        domain_match = 1 if domain.split('.')[0] in title.lower() else 0
+        has_social = 1 if any(s in content for s in ['facebook.com', 'twitter.com', 'instagram.com', 'linkedin']) else 0
+        has_copyright = 1 if any(x in content for x in ['©', 'copyright', 'all rights reserved']) else 0
+        has_desc = 1 if await page.query_selector('meta[name="description"]') else 0
+        has_password = 1 if await page.query_selector('input[type="password"]') else 0
+        has_submit = 1 if await page.query_selector('input[type="submit"], button[type="submit"]') else 0
+        
+        # Kiểm tra Form submit ra ngoài domain
+        ext_form = 0
+        forms = await page.query_selector_all('form')
+        for form in forms:
+            action = await form.get_attribute('action')
+            if action and action.startswith('http') and domain not in action:
+                ext_form = 1
+                break
 
-            # Truy cập
-            response = await page.goto(url, timeout=TIMEOUT, wait_until="domcontentloaded")
-            
-            # Đợi CF giải mã
-            await asyncio.sleep(random.uniform(5, 10))
-            
-            content = (await page.content()).lower()
-            title = (await page.title()) or "NO_TITLE"
+        # 3. Nhóm Kỹ thuật (Technical)
+        iframes = await page.query_selector_all('iframe')
+        hidden_iframe = 1 if await page.query_selector('iframe[style*="display:none"], iframe[width="0"], iframe[height="0"]') else 0
+        
+        return {
+            'URL': url,
+            'NoOfDegitsInURL': digits,
+            'IsHTTPS': is_https,
+            'DomainTitleMatchScore': domain_match,
+            'HasDescription': has_desc,
+            'HasExternalFormSubmit': ext_form,
+            'HasSocialNet': has_social,
+            'HasSubmitButton': has_submit,
+            'HasPasswordField': has_password,
+            'HasCopyrightInfo': has_copyright,
+            'label': 1, # Đang cào phishing nên mặc định là 1
+            'V1_PHash_Distance': 0, # Feature này cần so sánh ảnh, tạm để 0
+            'V2_Layout_Similarity': 0, # Tương tự, để 0
+            'V6_JS_Entropy': calculate_entropy(content),
+            'V7_Text_Readability_Score': len(visible_text.split()) / 500, # Normalize sơ bộ
+            'V8_Total_IFrames': len(iframes),
+            'V9_Has_Hidden_IFrame': hidden_iframe,
+            'V5_TLS_Issuer_Reputation': is_https, # Giả định đơn giản
+            'V4_DNS_Volatility_Count': 0, # Cần DNS lookup, tạm để 0
+            'Is_Top_1M_Domain': 0, # Phishing hiếm khi nằm trong top 1M
+            'V22_IP_Subdomain_Pattern': 1 if re.match(r'\d+\.\d+\.\d+', domain) else 0,
+            'V23_Entropy_Subdomain': calculate_entropy(domain.split('.')[0]),
+            'Trust_Score': domain_match * is_https,
+            'Digit_Ratio': digit_ratio
+        }
+    except Exception as e:
+        return None
 
-            if "just a moment" in title.lower() or "checking your browser" in content:
-                reason = "Kẹt ở Cloudflare Challenge"
-            elif "access denied" in content:
-                reason = "Cloudflare Blocked IP"
+# ================= WORKER CHẠY TRONG MỖI PROCESS =================
+async def run_worker(urls, proc_id):
+    results = []
+    async with async_playwright() as p:
+        # Khởi tạo browser với các flag vượt chặn bot
+        browser = await p.chromium.launch(headless=True, args=['--no-sandbox', '--disable-setuid-sandbox'])
+        # Giả lập User-Agent xịn
+        context = await browser.new_context(
+            user_agent="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36"
+        )
+        
+        for i, url in enumerate(urls):
+            page = await context.new_page()
+            data = await get_features(page, url)
+            if data:
+                results.append(data)
+                print(f"[Process {proc_id}] Success ({i+1}/{len(urls)}): {url[:40]}...")
             else:
-                # TRÍCH XUẤT THÀNH CÔNG
-                domain = urlparse(url).netloc.lower()
-                
-                # Sửa lỗi frames
-                v9_val = 0
-                frames = page.frames
-                for f in frames[1:]:
-                    try:
-                        el = await f.frame_element()
-                        if el and not await el.is_visible():
-                            v9_val = 1; break
-                    except: continue
-
-                dynamic_data.update({
-                    'V9_Has_Hidden_IFrame': v9_val,
-                    'HasPasswordField': 1 if await page.query_selector('input[type="password"]') else 0,
-                    'DomainTitleMatchScore': 1 if domain.split('.')[0] in title.lower() else 0,
-                    # ... thêm các feature khác tương tự ...
-                })
-                status = "SUCCESS"
-                reason = f"Vào được trang - Title: {title[:20]}"
-
-        except Exception as e:
-            reason = f"Lỗi: {str(e).splitlines()[0][:50]}"
-            # Chụp ảnh lỗi
-            try:
-                clean_name = re.sub(r'\W+', '_', url)[:20]
-                await page.screenshot(path=f"{SCREENSHOT_DIR}/{clean_name}.png")
-            except: pass
-        finally:
+                print(f"[Process {proc_id}] Failed: {url[:40]}...")
             await page.close()
             
-    # GHI LOG NGAY LẬP TỨC (Flush)
-    log_line = f"[{datetime.now().strftime('%H:%M:%S')}] {status} | {url} | {reason}\n"
-    with open(log_file, "a", encoding="utf-8") as f:
-        f.write(log_line)
-        f.flush() # Ép ghi xuống đĩa ngay
-    
-    return {**static_data, **dynamic_data, 'URL': url, 'label': label}
-
-# =========================================================
-# 4. CHẠY ĐA LUỒNG & LƯU BATCH
-# =========================================================
-async def run_batch(df_batch, process_id):
-    async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=False, args=[
-            '--no-sandbox', '--disable-setuid-sandbox', '--disable-blink-features=AutomationControlled'
-        ])
-        context = await browser.new_context(user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/122.0.0.0")
-        semaphore = asyncio.Semaphore(PAGES_PER_PROCESS)
-        
-        tasks = [process_url(row['URL'], row['label'], context, semaphore, LOG_FILE) for _, row in df_batch.iterrows()]
-        results = await asyncio.gather(*tasks)
         await browser.close()
-        return results
+    return results
 
-def process_entry(df_batch, process_id):
-    try: return asyncio.run(run_batch(df_batch, process_id))
-    except: return []
+def process_entry(urls, proc_id):
+    return asyncio.run(run_worker(urls, proc_id))
 
+# ================= MAIN EXECUTION =================
 if __name__ == "__main__":
-    if not os.path.exists(INPUT_FILE): exit()
+    # 1. Tải URL từ PhishTank
+    print("📥 Đang lấy URL từ PhishTank...")
+    try:
+        raw_pt = pd.read_csv(PHISHTANK_URL)
+        phish_urls = raw_pt['url'].head(LIMIT_URLS).tolist()
+    except:
+        print("❌ Lỗi tải CSV. Kiểm tra kết nối mạng!")
+        exit()
 
-    df_all = pd.read_csv(INPUT_FILE)
+    # 2. Chia việc cho các Process
+    chunks = np.array_split(phish_urls, NUM_PROCESSES)
     
-    # Checkpoint: Chỉ lấy những URL chưa có trong Log
-    processed_urls = set()
-    if os.path.exists(LOG_FILE):
-        with open(LOG_FILE, "r", encoding="utf-8") as f:
-            for line in f:
-                parts = line.split(" | ")
-                if len(parts) > 1: processed_urls.add(parts[1].strip())
+    final_results = []
+    print(f"🚀 Bắt đầu trích xuất với {NUM_PROCESSES} luồng...")
+    
+    with ProcessPoolExecutor(max_workers=NUM_PROCESSES) as executor:
+        futures = [executor.submit(process_entry, chunks[i].tolist(), i) for i in range(NUM_PROCESSES)]
+        for f in futures:
+            final_results.extend(f.result())
 
-    df_todo = df_all[~df_all['URL'].isin(processed_urls)]
-    total = len(df_todo)
-    print(f"🚀 Cần xử lý: {total} URL. Theo dõi log bằng lệnh: tail -f {LOG_FILE}")
-
-    # Chia batch nhỏ để lưu file liên tục
-    batch_size = NUM_PROCESSES * 5 
-    for i in range(0, total, batch_size):
-        current_batch = df_todo.iloc[i : i + batch_size]
-        sub_batches = [b for b in np.array_split(current_batch, NUM_PROCESSES) if not b.empty]
-        
-        with ProcessPoolExecutor(max_workers=NUM_PROCESSES) as executor:
-            futures = [executor.submit(process_entry, sub_batches[p], p) for p in range(len(sub_batches))]
-            batch_results = []
-            for fut in futures:
-                batch_results.extend(fut.result())
-        
-        # Lưu vào CSV ngay sau mỗi batch
-        if batch_results:
-            df_save = pd.DataFrame(batch_results)
-            df_save.to_csv(OUTPUT_FILE, mode='a', index=False, header=not os.path.exists(OUTPUT_FILE))
-            print(f"✅ Đã lưu checkpoint {i + len(current_batch)}/{total}")
+    # 3. Lưu kết quả
+    df_new = pd.DataFrame(final_results)
+    df_new.to_csv(OUTPUT_FILE, index=False)
+    print(f"🏁 Xong! Đã thu hoạch được {len(df_new)} mẫu Phishing sạch vào {OUTPUT_FILE}")
