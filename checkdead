@@ -7,7 +7,7 @@ import os
 import warnings
 
 # --- CẤU HÌNH ---
-INPUT_FILE = 'urldata_old_121k.csv'   # <--- ĐỔI TÊN FILE CỦA BẠN Ở ĐÂY
+INPUT_FILE = 'PhiUSIIL_Final_Dataset_Clean.csv'   # <--- ĐỔI TÊN FILE CỦA BẠN Ở ĐÂY
 OUTPUT_FILE = 'urldata_live_ready.csv' # File kết quả để đem đi trích xuất
 MAX_WORKERS = 100                     # Quét 100 luồng cho nhanh
 TIMEOUT = 3                           # 3s không trả lời là coi như chết
