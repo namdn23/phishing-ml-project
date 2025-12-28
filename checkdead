@@ -6,7 +6,7 @@ import os
 import warnings
 
 # --- CẤU HÌNH ---
-INPUT_FILE = 'urldata.csv'       # <--- ĐÃ CẬP NHẬT TÊN FILE CỦA BẠN
+INPUT_FILE = 'PhiUSIIL_Final_Dataset_Clean.csv'       # <--- ĐÃ CẬP NHẬT TÊN FILE CỦA BẠN
 OUTPUT_GOOD = 'urldata_clean.csv'    # File kết quả (URL sống)import pandas as pd
 import requests
 import concurrent.futures
