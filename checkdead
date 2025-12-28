@@ -2,214 +2,131 @@ import pandas as pd
 import requests
 import concurrent.futures
 import time
+import sys
 import os
 import warnings
 
 # --- CẤU HÌNH ---
-INPUT_FILE = 'PhiUSIIL_Final_Dataset_Clean.csv'       # <--- ĐÃ CẬP NHẬT TÊN FILE CỦA BẠN
-OUTPUT_GOOD = 'urldata_clean.csv'    # File kết quả (URL sống)import pandas as pd
-import requests
-import concurrent.futures
-import time
-import sys
-import os
+INPUT_FILE = 'urldata_old_121k.csv'   # <--- ĐỔI TÊN FILE CỦA BẠN Ở ĐÂY
+OUTPUT_FILE = 'urldata_live_ready.csv' # File kết quả để đem đi trích xuất
+MAX_WORKERS = 100                     # Quét 100 luồng cho nhanh
+TIMEOUT = 3                           # 3s không trả lời là coi như chết
 
-# --- CẤU HÌNH ---
-INPUT_FILE = 'urldata_old_121k.csv'  # Đổi tên thành file data cũ của bạn
-OUTPUT_FILE = 'urldata_live_only.csv' # File kết quả chứa link còn sống
-MAX_WORKERS = 100                     # Quét nhanh nên bật 100 luồng luôn
-TIMEOUT = 3                           # 3 giây không phản hồi là coi như chết
+# Tắt cảnh báo SSL
+warnings.filterwarnings('ignore')
 
 def check_alive(row):
-    """
-    Hàm kiểm tra nhanh xem URL còn sống không
-    """
+    """Kiểm tra URL sống hay chết"""
     url = str(row.get('url', '')).strip()
-    label = row.get('label', '')
+    label = row.get('label', '') # Lấy nhãn cũ để thống kê
     
     if not url: return None
     if not url.startswith(('http://', 'https://')):
         url = 'http://' + url
         
     try:
-        # Chỉ gửi request HEAD (nhẹ hơn GET) để check status
         headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36'}
+        # 1. Thử HEAD request (Nhanh)
         response = requests.head(url, headers=headers, timeout=TIMEOUT, allow_redirects=True, verify=False)
-        
-        # Nếu server trả về code < 400 (200, 301, 302...) là SỐNG
         if response.status_code < 400:
             return {'url': url, 'label': label}
             
-        # Nếu HEAD lỗi (một số server chặn HEAD), thử GET nhẹ cái
+        # 2. Thử GET request (Nếu HEAD bị chặn)
         if response.status_code >= 400:
              response = requests.get(url, headers=headers, timeout=TIMEOUT, stream=True, verify=False)
              if response.status_code < 400:
                  return {'url': url, 'label': label}
-                 
     except:
-        pass # Lỗi kết nối -> Coi như chết
-    
+        pass 
     return None
 
+def analyze_stats(df):
+    """Hàm thống kê số lượng Legit/Phishing"""
+    print("\n" + "="*50)
+    print("📊 BÁO CÁO SỐ LƯỢNG DATA CÒN SỐNG")
+    print("="*50)
+    
+    # Chuẩn hóa nhãn về chữ thường để đếm cho chuẩn
+    df['label_norm'] = df['label'].astype(str).str.lower()
+    
+    total = len(df)
+    
+    # Đếm Phishing (Các biến thể bad, 1, phishing)
+    phishing_count = len(df[df['label_norm'].isin(['bad', '1', 'phishing', 'malicious'])])
+    
+    # Đếm Legit (Các biến thể good, 0, benign, legitimate)
+    legit_count = len(df[df['label_norm'].isin(['good', '0', 'benign', 'legitimate'])])
+    
+    # Những nhãn lạ (nếu có)
+    unknown = total - phishing_count - legit_count
+    
+    print(f"🟢 LEGIT (Sạch):    {legit_count:,} ({legit_count/total*100:.1f}%)")
+    print(f"🔴 PHISHING (Bẩn): {phishing_count:,} ({phishing_count/total*100:.1f}%)")
+    
+    if unknown > 0:
+        print(f"⚪ KHÁC (Unknown):  {unknown:,}")
+        
+    print("-" * 50)
+    print(f"👉 TỔNG CỘNG:      {total:,} dòng")
+    print("="*50)
+    
+    # Cảnh báo nếu mất cân bằng
+    if phishing_count < 1000:
+        print("\n⚠️  CẢNH BÁO: Số lượng web Phishing còn sống QUÁ ÍT!")
+        print("   -> Bạn cần lên OpenPhish/PhishTank tải thêm data mới gấp.")
+        print("   -> Nếu train với bộ này, model sẽ bị 'Học vẹt' (Bias) theo web sạch.")
+    else:
+        print("\n✅ Dữ liệu khá ổn. Có thể đem đi trích xuất Feature.")
+
 def main():
-    print(f"🚀 BẮT ĐẦU LỌC URL SỐNG/CHẾT")
-    print(f"   📂 Input: {INPUT_FILE}")
+    print(f"🚀 BẮT ĐẦU QUÉT DATA CŨ ({INPUT_FILE})")
     
     if not os.path.exists(INPUT_FILE):
-        print("❌ Không tìm thấy file input.")
+        print(f"❌ Lỗi: Không tìm thấy file '{INPUT_FILE}'")
         return
 
     try:
         df = pd.read_csv(INPUT_FILE)
-        print(f"📊 Tổng số URL ban đầu: {len(df):,}")
+        print(f"📚 Tổng data gốc: {len(df):,} dòng")
     except:
         print("❌ Lỗi đọc file CSV.")
         return
 
     data = df.to_dict('records')
-    live_urls = []
+    live_results = []
     
-    start_time = time.time()
     processed = 0
     total = len(data)
-
-    print("⏳ Đang quét (Tốc độ cao)...")
+    start = time.time()
+    
+    print("⏳ Đang lọc link sống/chết (Max Speed)...")
     
     with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
         future_to_row = {executor.submit(check_alive, row): row for row in data}
         
         for future in concurrent.futures.as_completed(future_to_row):
-            result = future.result()
+            res = future.result()
             processed += 1
-            
-            if result:
-                live_urls.append(result)
-            
-            # Hiển thị tiến độ
-            if processed % 100 == 0 or processed == total:
+            if res:
+                live_results.append(res)
+                
+            if processed % 200 == 0 or processed == total:
                 percent = (processed / total) * 100
-                sys.stdout.write(f"\r   ▶ Đã check: {processed}/{total} ({percent:.1f}%) | 🌱 Còn sống: {len(live_urls)}")
+                sys.stdout.write(f"\r   ▶ Đã check: {processed} | 🌱 Sống: {len(live_results)} | 💀 Chết: {processed - len(live_results)}")
                 sys.stdout.flush()
 
-    print("\n" + "="*60)
-    print(f"✅ HOÀN TẤT!")
-    print(f"   💀 Đã loại bỏ: {total - len(live_urls)} URL chết.")
-    print(f"   🌱 Giữ lại:    {len(live_urls)} URL sống.")
+    print(f"\n\n✅ XONG! Thời gian: {time.time() - start:.1f}s")
     
-    if live_urls:
-        final_df = pd.DataFrame(live_urls)
+    if live_results:
+        final_df = pd.DataFrame(live_results)
         final_df.to_csv(OUTPUT_FILE, index=False)
-        print(f"💾 Đã lưu vào: {OUTPUT_FILE}")
+        print(f"💾 Đã lưu file sạch vào: {OUTPUT_FILE}")
         
-        # Thống kê nhanh
-        print("\n📊 Thống kê dữ liệu mới:")
-        print(final_df['label'].value_counts())
+        # GỌI HÀM THỐNG KÊ
+        analyze_stats(final_df)
+        
     else:
-        print("❌ Không còn URL nào sống sót!")
-
-if __name__ == "__main__":
-    import warnings
-    warnings.filterwarnings('ignore')
-    main()
-OUTPUT_BAD = 'urldata_dead.csv'      # File kết quả (URL chết)
-MAX_WORKERS = 100                    # Số luồng chạy song song
-
-# Headers giả lập trình duyệt
-HEADERS = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36'
-}
-
-def check_url_status(row):
-    # Lấy URL, xử lý trường hợp data bị rỗng
-    url = str(row.get('url', '')).strip()
-    if not url or url.lower() == 'nan': return None
-    
-    # Thêm http nếu thiếu
-    if not url.startswith(('http://', 'https://')):
-        target_url = 'http://' + url
-    else:
-        target_url = url
-
-    try:
-        # stream=True: Chỉ tải Headers -> Cực nhanh
-        # verify=False: Bỏ qua lỗi SSL (nhiều web phishing SSL lởm nhưng vẫn sống)
-        response = requests.get(target_url, headers=HEADERS, timeout=5, stream=True, verify=False)
-        
-        # Lấy các trang trả về code 200 (OK)
-        if 200 <= response.status_code < 300:
-            return {**row, 'status': 'alive'}
-        else:
-            return {**row, 'status': 'dead', 'code': response.status_code}
-            
-    except:
-        # Mọi lỗi (Timeout, DNS...) đều coi là chết
-        return {**row, 'status': 'dead', 'code': 'error'}
-
-def main():
-    # Tắt cảnh báo SSL
-    requests.packages.urllib3.disable_warnings()
-    
-    print(f"🚀 Bắt đầu lọc URL từ file: {INPUT_FILE}")
-    
-    try:
-        # Đọc file CSV
-        df = pd.read_csv(INPUT_FILE)
-        print(f"📊 Tổng số lượng URL gốc: {len(df)}")
-        
-        # Kiểm tra xem có cột 'url' không
-        if 'url' not in df.columns:
-            print("❌ Lỗi: File CSV không có cột tên là 'url'. Hãy kiểm tra lại header!")
-            return
-            
-    except FileNotFoundError:
-        print(f"❌ Lỗi: Không tìm thấy file '{INPUT_FILE}' trong thư mục này!")
-        return
-    except Exception as e:
-        print(f"❌ Lỗi đọc file: {e}")
-        return
-
-    data = df.to_dict('records')
-    good_urls = []
-    bad_urls = []
-    
-    start_time = time.time()
-    processed_count = 0
-    total = len(data)
-
-    print(f"🔥 Đang chạy {MAX_WORKERS} luồng song song...")
-
-    # CHẠY ĐA LUỒNG
-    with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-        future_to_url = {executor.submit(check_url_status, item): item for item in data}
-        
-        for future in concurrent.futures.as_completed(future_to_url):
-            result = future.result()
-            processed_count += 1
-            
-            if result:
-                if result['status'] == 'alive':
-                    # Xóa key 'status' tạm trước khi lưu
-                    del result['status']
-                    good_urls.append(result)
-                else:
-                    bad_urls.append(result)
-            
-            # Hiển thị tiến độ
-            if processed_count % 50 == 0 or processed_count == total:
-                percent = (processed_count / total) * 100
-                print(f"   ⏳ Xử lý: {processed_count}/{total} ({percent:.1f}%) | ✅ Sống: {len(good_urls)} | ❌ Chết: {len(bad_urls)}", end='\r')
-
-    print("\n" + "="*50)
-    print(f"✅ HOÀN TẤT! Thời gian: {time.time() - start_time:.2f}s")
-    
-    # Lưu file kết quả
-    if good_urls:
-        pd.DataFrame(good_urls).to_csv(OUTPUT_GOOD, index=False)
-        print(f"💾 Đã lưu {len(good_urls)} URL sạch vào: {OUTPUT_GOOD} (Dùng file này để chạy Feature Extractor)")
-    
-    if bad_urls:
-        pd.DataFrame(bad_urls).to_csv(OUTPUT_BAD, index=False)
-        print(f"🗑️  Đã loại bỏ {len(bad_urls)} URL chết.")
+        print("❌ Toàn bộ link đã chết! Data này không dùng được nữa.")
 
 if __name__ == "__main__":
     main()
