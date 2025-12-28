@@ -7,7 +7,110 @@ import warnings
 
 # --- CẤU HÌNH ---
 INPUT_FILE = 'urldata.csv'       # <--- ĐÃ CẬP NHẬT TÊN FILE CỦA BẠN
-OUTPUT_GOOD = 'urldata_clean.csv'    # File kết quả (URL sống)
+OUTPUT_GOOD = 'urldata_clean.csv'    # File kết quả (URL sống)import pandas as pd
+import requests
+import concurrent.futures
+import time
+import sys
+import os
+
+# --- CẤU HÌNH ---
+INPUT_FILE = 'urldata_old_121k.csv'  # Đổi tên thành file data cũ của bạn
+OUTPUT_FILE = 'urldata_live_only.csv' # File kết quả chứa link còn sống
+MAX_WORKERS = 100                     # Quét nhanh nên bật 100 luồng luôn
+TIMEOUT = 3                           # 3 giây không phản hồi là coi như chết
+
+def check_alive(row):
+    """
+    Hàm kiểm tra nhanh xem URL còn sống không
+    """
+    url = str(row.get('url', '')).strip()
+    label = row.get('label', '')
+    
+    if not url: return None
+    if not url.startswith(('http://', 'https://')):
+        url = 'http://' + url
+        
+    try:
+        # Chỉ gửi request HEAD (nhẹ hơn GET) để check status
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36'}
+        response = requests.head(url, headers=headers, timeout=TIMEOUT, allow_redirects=True, verify=False)
+        
+        # Nếu server trả về code < 400 (200, 301, 302...) là SỐNG
+        if response.status_code < 400:
+            return {'url': url, 'label': label}
+            
+        # Nếu HEAD lỗi (một số server chặn HEAD), thử GET nhẹ cái
+        if response.status_code >= 400:
+             response = requests.get(url, headers=headers, timeout=TIMEOUT, stream=True, verify=False)
+             if response.status_code < 400:
+                 return {'url': url, 'label': label}
+                 
+    except:
+        pass # Lỗi kết nối -> Coi như chết
+    
+    return None
+
+def main():
+    print(f"🚀 BẮT ĐẦU LỌC URL SỐNG/CHẾT")
+    print(f"   📂 Input: {INPUT_FILE}")
+    
+    if not os.path.exists(INPUT_FILE):
+        print("❌ Không tìm thấy file input.")
+        return
+
+    try:
+        df = pd.read_csv(INPUT_FILE)
+        print(f"📊 Tổng số URL ban đầu: {len(df):,}")
+    except:
+        print("❌ Lỗi đọc file CSV.")
+        return
+
+    data = df.to_dict('records')
+    live_urls = []
+    
+    start_time = time.time()
+    processed = 0
+    total = len(data)
+
+    print("⏳ Đang quét (Tốc độ cao)...")
+    
+    with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+        future_to_row = {executor.submit(check_alive, row): row for row in data}
+        
+        for future in concurrent.futures.as_completed(future_to_row):
+            result = future.result()
+            processed += 1
+            
+            if result:
+                live_urls.append(result)
+            
+            # Hiển thị tiến độ
+            if processed % 100 == 0 or processed == total:
+                percent = (processed / total) * 100
+                sys.stdout.write(f"\r   ▶ Đã check: {processed}/{total} ({percent:.1f}%) | 🌱 Còn sống: {len(live_urls)}")
+                sys.stdout.flush()
+
+    print("\n" + "="*60)
+    print(f"✅ HOÀN TẤT!")
+    print(f"   💀 Đã loại bỏ: {total - len(live_urls)} URL chết.")
+    print(f"   🌱 Giữ lại:    {len(live_urls)} URL sống.")
+    
+    if live_urls:
+        final_df = pd.DataFrame(live_urls)
+        final_df.to_csv(OUTPUT_FILE, index=False)
+        print(f"💾 Đã lưu vào: {OUTPUT_FILE}")
+        
+        # Thống kê nhanh
+        print("\n📊 Thống kê dữ liệu mới:")
+        print(final_df['label'].value_counts())
+    else:
+        print("❌ Không còn URL nào sống sót!")
+
+if __name__ == "__main__":
+    import warnings
+    warnings.filterwarnings('ignore')
+    main()
 OUTPUT_BAD = 'urldata_dead.csv'      # File kết quả (URL chết)
 MAX_WORKERS = 100                    # Số luồng chạy song song
 
