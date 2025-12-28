@@ -3,78 +3,66 @@ import numpy as np
 import os
 
 # --- CẤU HÌNH ---
-INPUT_FILE = 'dataset_final_train.csv'  # File vừa trích xuất xong
+INPUT_FILE = 'dataset_final_train.csv'
 
-def check_quality():
-    print(f"🕵️‍♂️ Đang kiểm tra chất lượng file: {INPUT_FILE}")
-    print("-" * 50)
-    
+def analyze_all_features():
+    print(f"🔬 ĐANG PHÂN TÍCH TOÀN BỘ FEATURE TRONG: {INPUT_FILE}")
+    print("=" * 60)
+
     if not os.path.exists(INPUT_FILE):
-        print(f"❌ Lỗi: Không tìm thấy file '{INPUT_FILE}'")
+        print("❌ Lỗi: Không tìm thấy file csv!")
         return
 
-    try:
-        # 1. Đọc file
-        df = pd.read_csv(INPUT_FILE)
+    df = pd.read_csv(INPUT_FILE)
+    
+    # Tách riêng label và url (nếu có)
+    features_df = df.drop(columns=['label', 'url'], errors='ignore')
+    label_col = df['label'] if 'label' in df.columns else None
+    
+    print(f"📊 Tổng số dòng: {len(df)}")
+    print(f"🧩 Tổng số feature: {len(features_df.columns)}")
+    print("-" * 60)
+
+    # 1. PHÂN TÍCH CHI TIẾT TỪNG FEATURE
+    print(f"{'FEATURE NAME':<25} | {'TYPE':<10} | {'STATS / DISTRIBUTION'}")
+    print("-" * 80)
+
+    for col in features_df.columns:
+        col_data = features_df[col]
+        unique_vals = col_data.unique()
+        n_unique = len(unique_vals)
         
-        # 2. Kiểm tra kích thước
-        n_rows, n_cols = df.shape
-        print(f"📊 Kích thước: {n_rows:,} dòng, {n_cols} cột")
+        # A. Nếu là feature dạng Binary (chỉ có 0, 1 hoặc -1)
+        if n_unique <= 5: 
+            type_str = "BINARY"
+            # Đếm giá trị
+            counts = col_data.value_counts().to_dict()
+            stat_str = ", ".join([f"{k}: {v}" for k, v in counts.items()])
         
-        # 3. Kiểm tra cột URL (Nên có để debug, nhưng phải drop khi train)
-        if 'url' in df.columns:
-            print("ℹ️  Cột 'url': CÓ (Sẽ cần bỏ cột này khi train)")
-            # Tạm thời bỏ cột url ra để check các feature số
-            df_numeric = df.drop(columns=['url'])
+        # B. Nếu là feature dạng Số đo (Length, Ratio, Entropy...)
         else:
-            print("ℹ️  Cột 'url': KHÔNG (Dữ liệu đã sạch, sẵn sàng train)")
-            df_numeric = df
-
-        # 4. Kiểm tra dữ liệu rỗng (Null/NaN)
-        null_counts = df_numeric.isnull().sum().sum()
-        if null_counts > 0:
-            print(f"❌ CẢNH BÁO: Có {null_counts} ô bị rỗng (NaN)!")
-            print("   -> Bạn cần điền số 0 hoặc xóa các dòng này trước khi train.")
-            # Show cột nào bị null
-            print(df_numeric.isnull().sum()[df_numeric.isnull().sum() > 0])
-        else:
-            print("✅ Dữ liệu rỗng (Null): 0 (Sạch bong!)")
-
-        # 5. Kiểm tra kiểu dữ liệu (Phải là số hết)
-        non_numeric_cols = df_numeric.select_dtypes(exclude=[np.number]).columns
-        if len(non_numeric_cols) > 0:
-            print(f"❌ CẢNH BÁO: Các cột sau không phải là số: {list(non_numeric_cols)}")
-            print("   -> Model không train được text. Hãy kiểm tra lại code trích xuất.")
-        else:
-            print("✅ Kiểu dữ liệu: Toàn bộ là SỐ (Chuẩn!)")
-
-        # 6. Kiểm tra Label (Quan trọng nhất)
-        if 'label' in df.columns:
-            print("\n⚖️  PHÂN BỐ NHÃN (LABEL):")
-            val_counts = df['label'].value_counts()
-            print(val_counts)
+            type_str = "NUMERIC"
+            min_val = col_data.min()
+            max_val = col_data.max()
+            mean_val = col_data.mean()
+            stat_str = f"Min: {min_val:.2f} | Max: {max_val:.2f} | Avg: {mean_val:.2f}"
             
-            # Check xem label có phải 0 và 1 không
-            unique_labels = df['label'].unique()
-            if set(unique_labels) <= {0, 1}:
-                 print("✅ Label chuẩn: Chỉ chứa 0 và 1.")
-            else:
-                 print(f"❌ Cảnh báo Label: Chứa giá trị lạ {unique_labels} (Phải map về 0/1)")
-        else:
-            print("❌ Lỗi: Không tìm thấy cột 'label'!")
+        print(f"{col:<25} | {type_str:<10} | {stat_str}")
 
-        # 7. Check sơ bộ các Feature quan trọng
-        print("\n🔍 CHECK NHANH GIÁ TRỊ CÁC FEATURE MỚI:")
-        cols_to_check = ['Google_DOM_Signature', 'Is_Trusted_Issuer', 'Has_Obfuscated_JS', 'Is_Punycode']
-        for col in cols_to_check:
-            if col in df.columns:
-                has_data = df[col].sum()
-                print(f"   - {col}: Có {has_data} dòng được kích hoạt (=1)")
-            else:
-                print(f"   - {col}: ⚠️ Không tìm thấy cột này!")
-
-    except Exception as e:
-        print(f"❌ Lỗi khi đọc file: {e}")
+    # 2. KIỂM TRA ĐỘ QUAN TRỌNG (CORRELATION)
+    if label_col is not None:
+        print("\n" + "=" * 60)
+        print("🌟 ĐỘ TƯƠNG QUAN VỚI NHÃN PHISHING (LABEL)")
+        print("(Số càng gần 1 hoặc -1 thì Feature càng xịn. Gần 0 là vô dụng)")
+        print("-" * 60)
+        
+        correlations = features_df.corrwith(label_col).sort_values(ascending=False)
+        
+        print(f"{'Feature':<25} | {'Correlation Score'}")
+        print("-" * 45)
+        for feat, score in correlations.items():
+            stars = "⭐" * int(abs(score) * 5) # Đánh giá sao
+            print(f"{feat:<25} | {score: .4f} {stars}")
 
 if __name__ == "__main__":
-    check_quality()
+    analyze_all_features()
