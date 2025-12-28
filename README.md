@@ -116,13 +116,25 @@ class FeatureExtractor:
     
     def _get_subdomain(self):
         """
-        Trích xuất subdomain từ domain
-        Example: login.secure.paypal.com -> login.secure.paypal
+        Trích xuất subdomain từ domain (improved logic)
+        Example: 
+        - login.paypal.com -> login
+        - secure.login.paypal.com -> secure.login
+        - shopee.com.vn -> "" (không có subdomain)
+        - abc.shopee.com.vn -> abc
         """
         parts = self.domain.split('.')
-        if len(parts) > 2:
-            # Loại bỏ TLD (.com, .vn, .co.uk, etc.)
-            return '.'.join(parts[:-2]) if parts[-2] not in ['co', 'com', 'net'] else '.'.join(parts[:-3])
+        
+        # Handle special TLDs: .com.vn, .co.uk, .com.au, etc.
+        if len(parts) >= 3 and parts[-2] in ['com', 'co', 'net', 'org', 'edu', 'gov', 'ac']:
+            # Domain có dạng: xxx.com.vn hoặc xxx.co.uk
+            if len(parts) > 3:
+                return '.'.join(parts[:-3])  # Bỏ 3 phần cuối
+            return ""
+        elif len(parts) > 2:
+            # Domain thường: xxx.com, xxx.vn
+            return '.'.join(parts[:-2])  # Bỏ 2 phần cuối
+        
         return ""
     
     # ========== HTML FETCHING ==========
@@ -189,12 +201,15 @@ class FeatureExtractor:
                     cert_age = (now - not_before).days
                     validity_period = (not_after - not_before).days
                     
-                    # Extract issuer
+                    # Extract issuer (improved logic)
                     issuer = "Unknown"
                     if 'issuer' in cert:
+                        # Thử các trường có thể chứa issuer name
+                        issuer_fields = ['organizationName', 'O', 'commonName', 'CN']
+                        
                         for item in cert['issuer']:
                             for key, value in item:
-                                if key in ['organizationName', 'commonName', 'O', 'CN']:
+                                if key in issuer_fields and value:
                                     issuer = value
                                     break
                             if issuer != "Unknown":
@@ -346,7 +361,13 @@ class FeatureExtractor:
         
         # Subdomain analysis
         subdomain = self._get_subdomain()
-        subdomain_level = max(0, num_dots - 1)
+        
+        # FIX: Tính subdomain level chính xác
+        # Đếm số dots trong subdomain, không phải trong toàn bộ domain
+        if subdomain:
+            subdomain_level = subdomain.count('.') + 1  # +1 vì subdomain có ít nhất 1 level
+        else:
+            subdomain_level = 0
         
         # Entropy calculations
         entropy_domain = self._entropy(self.domain)
@@ -466,7 +487,7 @@ def process_row(row):
     Returns: dict chứa features + label
     """
     try:
-        url = str(row.get('URL', '')).strip()
+        url = str(row.get('url', '')).strip()
         label = row.get('label', '')
         
         if not url:
