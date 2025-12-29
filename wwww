@@ -1,57 +1,52 @@
 import pandas as pd
 import os
 
-# --- CẤU HÌNH FILE ---
-FILE_NEW = 'urldata_live_ready.csv'   # File mới (127k dòng: 109k legit + 17k phish)
-FILE_OLD = 'old_phishing_7k.csv'      # File cũ (chứa 7k phishing nhãn 'bad')
-OUTPUT_FILE = 'dataset_combined_v2.csv'
+# --- CẤU HÌNH ---
+INPUT_FILE = 'dataset_combined_v2.csv'  # File đầu vào của bạn
+OUTPUT_FILE = 'datakieumoi.csv' # File sau khi đã cân bằng
 
 def main():
-    print("📂 Đang đọc dữ liệu...")
-    if not os.path.exists(FILE_NEW) or not os.path.exists(FILE_OLD):
-        print("❌ Lỗi: Thiếu file đầu vào!")
+    print(f"📂 Đang đọc file: {INPUT_FILE}")
+    if not os.path.exists(INPUT_FILE):
+        print("❌ Không tìm thấy file đầu vào!")
         return
 
-    # 1. Đọc file mới và chuẩn hóa tên cột
-    df_new = pd.read_csv(FILE_NEW)
-    # Vì ảnh bạn gửi cột URL viết hoa, ta đổi về 'url' cho đồng bộ
-    df_new.rename(columns={'URL': 'url'}, inplace=True)
-    print(f"✅ Đã tải file mới: {len(df_new):,} dòng")
-
-    # 2. Đọc file cũ và CHỈ LẤY PHISHING
-    df_old_full = pd.read_csv(FILE_OLD)
-    # Lọc lấy những dòng nhãn 'bad'
-    df_old_phish = df_old_full[df_old_full['label'].astype(str).str.lower() == 'bad'].copy()
-    # Đổi nhãn 'bad' thành số 1 cho giống file mới
-    df_old_phish['label'] = 1
-    print(f"✅ Đã lọc từ file cũ: {len(df_old_phish):,} link phishing")
-
-    # 3. Gộp file mới (nguyên vẹn) + phishing file cũ
-    print("🔗 Đang tiến hành gộp...")
-    df_combined = pd.concat([df_new, df_old_phish], ignore_index=True)
-
-    # 4. Xóa trùng lặp URL
-    # (Nếu một link phishing đã có ở file mới rồi thì không thêm bản trùng từ file cũ nữa)
-    before_count = len(df_combined)
-    df_combined.drop_duplicates(subset=['url'], keep='first', inplace=True)
-    after_count = len(df_combined)
-
-    # 5. Thống kê và lưu
-    df_combined.to_csv(OUTPUT_FILE, index=False)
+    # 1. Load dữ liệu
+    df = pd.read_csv(INPUT_FILE)
     
-    # Đếm số lượng cuối cùng
-    final_legit = len(df_combined[df_combined['label'].astype(str) == '0'])
-    final_phish = len(df_combined[df_combined['label'].astype(str) == '1'])
-
+    # 2. Tách riêng 2 lớp dựa trên label (đảm bảo label là kiểu string hoặc số khớp với file)
+    # Trong file của bạn label đang là 0 và 1
+    df_phishing = df[df['label'].astype(str) == '1']
+    df_legit = df[df['label'].astype(str) == '0']
+    
+    num_phishing = len(df_phishing)
+    num_legit_total = len(df_legit)
+    
+    print(f"📊 Dữ liệu hiện tại:")
+    print(f"   - Phishing (1): {num_phishing:,} dòng")
+    print(f"   - Legit (0):    {num_legit_total:,} dòng")
+    
+    # 3. Lọc (Downsampling) lớp Legit
+    # Ở đây mình lấy số lượng Legit BẰNG số lượng Phishing (Tỷ lệ 1:1)
+    # Bạn có thể thay n=num_phishing bằng một con số cụ thể nếu muốn
+    print(f"\n⚖️ Đang thực hiện cân bằng tỷ lệ 1:1...")
+    df_legit_balanced = df_legit.sample(n=num_phishing, random_state=42)
+    
+    # 4. Gộp lại và trộn ngẫu nhiên (Shuffle)
+    df_final = pd.concat([df_phishing, df_legit_balanced])
+    df_final = df_final.sample(frac=1, random_state=42).reset_index(drop=True)
+    
+    # 5. Lưu kết quả
+    df_final.to_csv(OUTPUT_FILE, index=False)
+    
     print("-" * 50)
-    print(f"📊 THỐNG KÊ KẾT QUẢ:")
-    print(f"🟢 Legit (giữ nguyên): {final_legit:,}")
-    print(f"🔴 Phishing (tổng hợp): {final_phish:,}")
-    print(f"✨ Tổng cộng file mới: {len(df_combined):,} dòng")
-    print(f"♻️  Đã loại bỏ {before_count - after_count:,} URL bị trùng giữa 2 file.")
-    print(f"💾 File đã lưu: {OUTPUT_FILE}")
+    print(f"✅ HOÀN TẤT CÂN BẰNG!")
+    print(f"   - Số lượng Legit mới:    {len(df_legit_balanced):,}")
+    print(f"   - Số lượng Phishing giữ: {len(df_phishing):,}")
+    print(f"👉 Tổng cộng file mới:      {len(df_final):,}")
+    print(f"💾 Đã lưu tại:              {OUTPUT_FILE}")
     print("-" * 50)
-    print("🚀 Bây giờ bạn có thể dùng file này để trích xuất 27 features!")
+    print("🚀 Tiếp theo: Dùng file này để chạy tool 'Trích xuất 27 Features'!")
 
 if __name__ == "__main__":
     main()
