@@ -1,67 +1,50 @@
 import pandas as pd
 import os
 
-# --- CẤU HÌNH FILE ---
-FILE_LIVE_READY = 'urldata_live_ready.csv'  # File 127k dòng vừa quét xong
-FILE_OLD_PHISHING = 'old_phishing_7k.csv'   # File 7k phishing cũ của bạn
-OUTPUT_FINAL = 'urldata_balanced_final.csv' # File cuối cùng để đi trích xuất 27 features
+# Tên file bạn nghi ngờ có 7k phishing
+FILE_PATH = 'old_phishing_7k.csv' 
 
-def main():
-    # 1. Load dữ liệu
-    print("📂 Đang đọc các file dữ liệu...")
-    df_live = pd.read_csv(FILE_LIVE_READY)
-    
-    if os.path.exists(FILE_OLD_PHISHING):
-        df_old = pd.read_csv(FILE_OLD_PHISHING)
-    else:
-        print(f"❌ Không tìm thấy file {FILE_OLD_PHISHING}")
+def check_file():
+    if not os.path.exists(FILE_PATH):
+        print(f"❌ Không tìm thấy file: {FILE_PATH}")
         return
 
-    # 2. Đồng nhất nhãn (Label) về dạng số: 0 (Sạch), 1 (Bẩn)
-    def clean_label(l):
-        l = str(l).lower()
-        if l in ['bad', '1', 'phishing', 'malicious']: return 1
-        return 0
+    print(f"🔍 Đang kiểm tra file: {FILE_PATH}")
+    print("-" * 50)
 
-    df_live['label'] = df_live['label'].apply(clean_label)
-    df_old['label'] = df_old['label'].apply(clean_label)
-
-    # 3. Lọc riêng Phishing và Legit từ file mới quét
-    df_live_phishing = df_live[df_live['label'] == 1]
-    df_live_legit = df_live[df_live['label'] == 0]
-
-    # 4. Gộp toàn bộ Phishing (Mới + Cũ) và xóa trùng lặp URL
-    print("🔗 Đang gộp dữ liệu Phishing...")
-    df_all_phishing = pd.concat([df_live_phishing, df_old]).drop_duplicates(subset=['url'])
-    
-    num_phishing = len(df_all_phishing)
-    print(f"✅ Tổng số Phishing sau khi gộp: {num_phishing:,}")
-
-    # 5. CÂN BẰNG DỮ LIỆU (Bí kíp để Model khôn)
-    # Nếu lấy 100% Legit (109k) thì sẽ rất lệch. 
-    # Nhóm em nên lấy tỉ lệ 1:1.5 hoặc 1:2 để Model vừa giỏi bắt Phishing vừa ít báo nhầm.
-    print(f"⚖️ Đang lấy mẫu dữ liệu Legit để cân bằng...")
-    num_legit_to_take = int(num_phishing * 1.5) # Lấy gấp 1.5 lần phishing
-    
-    if num_legit_to_take > len(df_live_legit):
-        num_legit_to_take = len(df_live_legit)
+    try:
+        # Đọc file
+        df = pd.read_csv(FILE_PATH)
         
-    df_legit_sampled = df_live_legit.sample(n=num_legit_to_take, random_state=42)
+        # 1. Hiển thị 5 dòng đầu tiên để xem tên cột
+        print("📋 5 dòng đầu tiên của dữ liệu:")
+        print(df.head())
+        print("-" * 50)
 
-    # 6. Gộp lại thành file cuối cùng
-    df_final = pd.concat([df_all_phishing, df_legit_sampled]).sample(frac=1, random_state=42) # Trộn ngẫu nhiên
+        # 2. Thống kê tổng số dòng
+        total_rows = len(df)
+        print(f"📊 Tổng số dòng thực tế: {total_rows:,}")
 
-    # 7. Lưu file
-    df_final.to_csv(OUTPUT_FINAL, index=False)
-    
-    print("-" * 50)
-    print(f"📊 THỐNG KÊ FILE CUỐI CÙNG:")
-    print(f"🟢 Legit (Sạch):   {len(df_legit_sampled):,}")
-    print(f"🔴 Phishing (Bẩn): {len(df_all_phishing):,}")
-    print(f"👉 Tổng cộng:      {len(df_final):,} dòng")
-    print(f"💾 Đã lưu tại:     {OUTPUT_FINAL}")
-    print("-" * 50)
-    print("🚀 Tiếp theo: Hãy dùng file này chạy tool 'Trích xuất 27 Features'!")
+        # 3. Thống kê theo nhãn (Label)
+        if 'label' in df.columns:
+            print("\n📈 Thống kê theo nhãn (Label):")
+            # Chuẩn hóa nhãn về chữ thường để đếm chính xác
+            df['label_check'] = df['label'].astype(str).str.lower()
+            counts = df['label_check'].value_counts()
+            for label, count in counts.items():
+                print(f"   - Nhãn '{label}': {count:,} dòng")
+        else:
+            print("\n⚠️ Không tìm thấy cột 'label'. Các cột hiện có là:")
+            print(df.columns.tolist())
+
+        # 4. Kiểm tra URL trùng lặp
+        if 'url' in df.columns:
+            duplicates = df.duplicated(subset=['url']).sum()
+            print(f"\n🔗 Số lượng URL trùng lặp: {duplicates:,}")
+            print(f"✨ Số lượng URL duy nhất: {total_rows - duplicates:,}")
+
+    except Exception as e:
+        print(f"❌ Lỗi khi đọc file: {e}")
 
 if __name__ == "__main__":
-    main()
+    check_file()
