@@ -1,52 +1,8 @@
-import pandas as pd
-import os
-
-# --- CẤU HÌNH ---
-INPUT_FILE = 'dataset_combined_v2.csv'  # File đầu vào của bạn
-OUTPUT_FILE = 'datakieumoi.csv' # File sau khi đã cân bằng
-
-def main():
-    print(f"📂 Đang đọc file: {INPUT_FILE}")
-    if not os.path.exists(INPUT_FILE):
-        print("❌ Không tìm thấy file đầu vào!")
-        return
-
-    # 1. Load dữ liệu
-    df = pd.read_csv(INPUT_FILE)
-    
-    # 2. Tách riêng 2 lớp dựa trên label (đảm bảo label là kiểu string hoặc số khớp với file)
-    # Trong file của bạn label đang là 0 và 1
-    df_phishing = df[df['label'].astype(str) == '1']
-    df_legit = df[df['label'].astype(str) == '0']
-    
-    num_phishing = len(df_phishing)
-    num_legit_total = len(df_legit)
-    
-    print(f"📊 Dữ liệu hiện tại:")
-    print(f"   - Phishing (1): {num_phishing:,} dòng")
-    print(f"   - Legit (0):    {num_legit_total:,} dòng")
-    
-    # 3. Lọc (Downsampling) lớp Legit
-    # Ở đây mình lấy số lượng Legit BẰNG số lượng Phishing (Tỷ lệ 1:1)
-    # Bạn có thể thay n=num_phishing bằng một con số cụ thể nếu muốn
-    print(f"\n⚖️ Đang thực hiện cân bằng tỷ lệ 1:1...")
-    df_legit_balanced = df_legit.sample(n=num_phishing, random_state=42)
-    
-    # 4. Gộp lại và trộn ngẫu nhiên (Shuffle)
-    df_final = pd.concat([df_phishing, df_legit_balanced])
-    df_final = df_final.sample(frac=1, random_state=42).reset_index(drop=True)
-    
-    # 5. Lưu kết quả
-    df_final.to_csv(OUTPUT_FILE, index=False)
-    
-    print("-" * 50)
-    print(f"✅ HOÀN TẤT CÂN BẰNG!")
-    print(f"   - Số lượng Legit mới:    {len(df_legit_balanced):,}")
-    print(f"   - Số lượng Phishing giữ: {len(df_phishing):,}")
-    print(f"👉 Tổng cộng file mới:      {len(df_final):,}")
-    print(f"💾 Đã lưu tại:              {OUTPUT_FILE}")
-    print("-" * 50)
-    print("🚀 Tiếp theo: Dùng file này để chạy tool 'Trích xuất 27 Features'!")
-
-if __name__ == "__main__":
-    main()
+Traceback (most recent call last):
+  File "/home/kali/phishing_extractor/hahaha.py", line 10, in <module>
+    import undetected_chromedriver as uc
+  File "/home/kali/phishing_extractor/venv/lib/python3.13/site-packages/undetected_chromedriver/__init__.py", line 44, in <module>
+    from .patcher import IS_POSIX
+  File "/home/kali/phishing_extractor/venv/lib/python3.13/site-packages/undetected_chromedriver/patcher.py", line 4, in <module>
+    from distutils.version import LooseVersion
+ModuleNotFoundError: No module named 'distutils'
