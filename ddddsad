@@ -2,71 +2,103 @@ import pandas as pd
 import numpy as np
 
 # --- CẤU HÌNH ---
-FILE_PATH = 'dataset_final_train_fixed.csv' # File đã vá lỗi SSL
+# Dùng file mới nhất bạn vừa chạy fix SSL xong
+FILE_PATH = 'dataset_final_train_fixed.csv' 
 
-def final_audit():
-    print(f"🕵️ ĐANG KIỂM TRA TOÀN DIỆN 29 CỘT DỮ LIỆU...")
-    print("="*70)
+def audit_everything():
+    print(f"🕵️ BẮT ĐẦU KIỂM TRA TOÀN BỘ CÁC CỘT DỮ LIỆU...")
+    print("="*80)
 
     try:
         df = pd.read_csv(FILE_PATH)
-    except:
-        print(f"❌ Không tìm thấy file {FILE_PATH}")
+        # Loại bỏ cột URL nếu còn, để chỉ tính toán trên số
+        if 'url' in df.columns:
+            df_numeric = df.drop(columns=['url'])
+        else:
+            df_numeric = df
+    except Exception as e:
+        print(f"❌ Lỗi đọc file: {e}")
         return
 
-    # 1. KIỂM TRA DỮ LIỆU RÁC (NULL / INFINITY)
-    print("\n🧹 1. KIỂM TRA DỮ LIỆU RỖNG/LỖI:")
-    null_counts = df.isnull().sum().sum()
-    if null_counts > 0:
-        print(f"⚠️  CẢNH BÁO: Có {null_counts} ô bị trống (NaN). Cần điền 0 hoặc xóa.")
-    else:
-        print("✅ Dữ liệu sạch, không có ô trống.")
-
-    # 2. KIỂM TRA CÁC TÍNH NĂNG "CHẾT" (ZERO VARIANCE)
-    # Tính năng chết là tính năng mà mọi dòng đều có giá trị y hệt nhau -> AI không học được gì.
-    print("\n💀 2. KIỂM TRA TÍNH NĂNG 'CHẾT' (Vô dụng):")
+    # 1. KIỂM TRA TÍNH NĂNG CHẾT (ZERO VARIANCE)
+    # Nếu một cột mà tất cả các dòng đều có giá trị y hệt nhau -> AI không học được gì -> NÊN XÓA
+    print("\n💀 1. DANH SÁCH TÍNH NĂNG 'CHẾT' (Cần xóa):")
     dead_features = []
-    for col in df.columns:
-        if col in ['url', 'label']: continue
-        if df[col].nunique() <= 1:
-            val = df[col].iloc[0]
-            print(f"   ❌ Cột '{col}': Toàn bộ giá trị là {val} -> NÊN XÓA")
-            dead_features.append(col)
-            
-    if not dead_features:
-        print("✅ Tuyệt vời! Mọi tính năng đều có sự biến thiên (có ích).")
-
-    # 3. KIỂM TRA HIỆU QUẢ CỦA SSL (Sau khi đã fix)
-    print("\n🛡️ 3. KIỂM TRA HIỆU QUẢ SSL (Sau khi fix):")
-    ssl_ok = len(df[df['Certificate_Age'] != -1])
-    ssl_fail = len(df) - ssl_ok
-    print(f"   - ✅ Lấy được SSL: {ssl_ok:,} dòng ({ssl_ok/len(df)*100:.1f}%)")
-    print(f"   - ❌ Vẫn lỗi (-1): {ssl_fail:,} dòng")
     
-    if ssl_ok == 0:
-        print("   ⚠️  CẢNH BÁO: Vẫn chưa lấy được SSL nào. Kiểm tra lại mạng/code.")
+    for col in df_numeric.columns:
+        if col == 'label': continue
+        
+        unique_vals = df_numeric[col].unique()
+        if len(unique_vals) == 1:
+            print(f"   ❌ {col.ljust(30)}: Giá trị duy nhất là {unique_vals[0]}")
+            dead_features.append(col)
+    
+    if not dead_features:
+        print("   ✅ Tuyệt vời! Không có tính năng nào bị chết hoàn toàn.")
 
-    # 4. PHÂN TÍCH TƯƠNG QUAN (CORRELATION)
-    # Xem tính năng nào giúp AI phát hiện Phishing tốt nhất
-    print("\nww 4. TOP 10 TÍNH NĂNG QUAN TRỌNG NHẤT (Tương quan với Label):")
-    # Chỉ lấy các cột số
-    numeric_df = df.select_dtypes(include=[np.number])
-    if 'label' in numeric_df.columns:
-        correlations = numeric_df.corr()['label'].abs().sort_values(ascending=False)
-        # Bỏ qua dòng label tự tương quan với chính nó
-        top_10 = correlations.drop('label').head(10)
+    # 2. KIỂM TRA CÁC NHÓM TÍNH NĂNG CỤ THỂ
+    print("-" * 80)
+    print("\n🔍 2. KIỂM TRA CHI TIẾT TỪNG NHÓM:")
+
+    # --- Nhóm A: URL Structure ---
+    print("\n   [A] Cấu trúc URL (Static Features):")
+    url_feats = ['Domain_Length', 'Path_Length', 'Num_Dots', 'Digit_Ratio', 'Entropy_Subdomain']
+    for f in url_feats:
+        if f in df.columns:
+            avg = df[f].mean()
+            print(f"       - {f.ljust(25)}: Trung bình = {avg:.4f} (Ổn)")
+
+    # --- Nhóm B: SSL (Infrastructure) ---
+    print("\n   [B] Hạ tầng SSL (Dynamic Features):")
+    ssl_ok = len(df[df['Certificate_Age'] > 0])
+    ssl_fail = len(df[df['Certificate_Age'] == -1])
+    print(f"       - Dữ liệu SSL hợp lệ: {ssl_ok:,} dòng")
+    print(f"       - Dữ liệu SSL bị lỗi (-1): {ssl_fail:,} dòng")
+    if ssl_ok == 0:
+        print("       ⚠️  CẢNH BÁO: Nhóm này coi như HỎNG TOÀN BỘ.")
+
+    # --- Nhóm C: Nội dung HTML (Content Features) ---
+    print("\n   [C] Nội dung HTML (Dynamic Features):")
+    html_feats = ['Has_External_Form', 'Has_Submit_Button', 'Has_Password_Field', 'Brand_Impersonation']
+    for f in html_feats:
+        if f in df.columns:
+            count_1 = len(df[df[f] == 1])
+            print(f"       - {f.ljust(25)}: Tìm thấy {count_1:,} trang có dấu hiệu này.")
+
+    # 3. TOP TÍNH NĂNG QUAN TRỌNG NHẤT (CORRELATION)
+    print("-" * 80)
+    print("\n🏆 3. TOP 10 TÍNH NĂNG MẠNH NHẤT (AI sẽ dựa vào đây để bắt Phishing):")
+    print("(Giá trị càng gần 1.0 hoặc -1.0 thì càng quan trọng)")
+    
+    if 'label' in df_numeric.columns:
+        corr = df_numeric.corrwith(df_numeric['label']).abs().sort_values(ascending=False)
+        top_10 = corr.drop('label').head(10)
         
         for feature, score in top_10.items():
-            print(f"   ★ {feature.ljust(25)}: {score:.4f} (Độ mạnh)")
+            # Đánh giá sơ bộ
+            strength = "Yếu"
+            if score > 0.5: strength = "CỰC MẠNH 🔥"
+            elif score > 0.3: strength = "Mạnh 💪"
+            elif score > 0.1: strength = "Khá 🆗"
+            
+            print(f"   ★ {feature.ljust(30)}: {score:.4f} ({strength})")
+
+    # 4. KẾT LUẬN CUỐI CÙNG
+    print("="*80)
+    print("📢 KẾT LUẬN TƯ VẤN:")
     
-    print("\n" + "="*70)
-    print("📢 KẾT LUẬN:")
+    recommendation = "TRAIN ĐƯỢC NGAY"
+    
     if dead_features:
-        print(f"⚠️  Cần xóa {len(dead_features)} cột vô dụng trước khi train.")
-    elif ssl_ok < 1000:
-        print("⚠️  Dữ liệu SSL quá ít, Model sẽ chủ yếu dựa vào URL.")
+        print(f"1. Bạn CẦN XÓA {len(dead_features)} cột chết đã liệt kê ở mục 1.")
+        recommendation = "CẦN DỌN DẸP TRƯỚC KHI TRAIN"
+        
+    if ssl_ok == 0:
+        print("2. SSL vẫn hỏng hoàn toàn. Model sẽ bỏ qua SSL.")
     else:
-        print("🚀 BỘ DỮ LIỆU RẤT TỐT! SẴN SÀNG ĐỂ TRAIN.")
+        print(f"2. Đã cứu được {ssl_ok} dòng SSL. Model sẽ thông minh hơn!")
+        
+    print(f"\n👉 ĐÁNH GIÁ: {recommendation}")
 
 if __name__ == "__main__":
-    final_audit()
+    audit_everything()
