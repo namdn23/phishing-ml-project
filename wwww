@@ -1,50 +1,62 @@
 import pandas as pd
 import os
 
-# Tên file bạn nghi ngờ có 7k phishing
-FILE_PATH = 'old_phishing_7k.csv' 
+# --- CẤU HÌNH FILE ---
+FILE_LIVE_READY = 'urldata_live_ready.csv'  # File 127k dòng mới quét
+FILE_OLD_DATA = 'old_phishing_7k.csv'      # File cũ (chứa 77k dòng thực tế)
+OUTPUT_PHISHING_ONLY = 'all_phishing_clean.csv'
 
-def check_file():
-    if not os.path.exists(FILE_PATH):
-        print(f"❌ Không tìm thấy file: {FILE_PATH}")
+def main():
+    # 1. Đọc dữ liệu
+    print("📂 Đang đọc các file dữ liệu...")
+    if not os.path.exists(FILE_LIVE_READY) or not os.path.exists(FILE_OLD_DATA):
+        print("❌ Lỗi: Thiếu file đầu vào. Kiểm tra lại tên file!")
         return
 
-    print(f"🔍 Đang kiểm tra file: {FILE_PATH}")
+    df_live = pd.read_csv(FILE_LIVE_READY)
+    df_old = pd.read_csv(FILE_OLD_DATA)
+
+    # 2. Chuẩn hóa nhãn (Label)
+    # Hàm này đảm bảo mọi biến thể của nhãn lừa đảo đều về số 1
+    def is_phishing(l):
+        l = str(l).lower().strip()
+        return 1 if l in ['bad', '1', 'phishing', 'malicious'] else 0
+
+    print("🔍 Đang lọc chỉ lấy các URL Phishing...")
+    
+    # Lọc Phishing từ file mới quét
+    df_live['is_phish'] = df_live['label'].apply(is_phishing)
+    phish_new = df_live[df_live['is_phish'] == 1].copy()
+
+    # Lọc Phishing từ file cũ
+    df_old['is_phish'] = df_old['label'].apply(is_phishing)
+    phish_old = df_old[df_old['is_phish'] == 1].copy()
+
+    # 3. Gộp lại và xóa trùng lặp
+    # Việc xóa trùng lặp (drop_duplicates) rất quan trọng để tránh Model học vẹt
+    print("🔗 Đang gộp và loại bỏ URL trùng lặp...")
+    df_combined = pd.concat([phish_new, phish_old], ignore_index=True)
+    
+    # Giữ lại các cột cần thiết (url và label)
+    df_combined = df_combined[['url', 'label']]
+    
+    # Xóa trùng dựa trên cột 'url'
+    before_count = len(df_combined)
+    df_combined.drop_duplicates(subset=['url'], inplace=True)
+    after_count = len(df_combined)
+
+    # 4. Lưu kết quả
+    df_combined.to_csv(OUTPUT_PHISHING_ONLY, index=False)
+
     print("-" * 50)
-
-    try:
-        # Đọc file
-        df = pd.read_csv(FILE_PATH)
-        
-        # 1. Hiển thị 5 dòng đầu tiên để xem tên cột
-        print("📋 5 dòng đầu tiên của dữ liệu:")
-        print(df.head())
-        print("-" * 50)
-
-        # 2. Thống kê tổng số dòng
-        total_rows = len(df)
-        print(f"📊 Tổng số dòng thực tế: {total_rows:,}")
-
-        # 3. Thống kê theo nhãn (Label)
-        if 'label' in df.columns:
-            print("\n📈 Thống kê theo nhãn (Label):")
-            # Chuẩn hóa nhãn về chữ thường để đếm chính xác
-            df['label_check'] = df['label'].astype(str).str.lower()
-            counts = df['label_check'].value_counts()
-            for label, count in counts.items():
-                print(f"   - Nhãn '{label}': {count:,} dòng")
-        else:
-            print("\n⚠️ Không tìm thấy cột 'label'. Các cột hiện có là:")
-            print(df.columns.tolist())
-
-        # 4. Kiểm tra URL trùng lặp
-        if 'url' in df.columns:
-            duplicates = df.duplicated(subset=['url']).sum()
-            print(f"\n🔗 Số lượng URL trùng lặp: {duplicates:,}")
-            print(f"✨ Số lượng URL duy nhất: {total_rows - duplicates:,}")
-
-    except Exception as e:
-        print(f"❌ Lỗi khi đọc file: {e}")
+    print(f"📊 KẾT QUẢ LỌC PHISHING:")
+    print(f"   + Phishing từ file mới: {len(phish_new):,}")
+    print(f"   + Phishing từ file cũ:  {len(phish_old):,}")
+    print(f"   + Tổng sau gộp:         {before_count:,}")
+    print(f"   + Sau khi xóa trùng:    {after_count:,}")
+    print(f"💾 File đã lưu: {OUTPUT_PHISHING_ONLY}")
+    print("-" * 50)
+    print("🚀 Tiếp theo: Bạn có thể dùng file này để gộp với tập Legit nhằm cân bằng dữ liệu.")
 
 if __name__ == "__main__":
-    check_file()
+    main()
