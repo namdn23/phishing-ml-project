@@ -1,11 +1,69 @@
-url,timestamp,status,Is_HTTPS,Subdomain_Count,Has_Phishing_Keyword,Path_Depth,URL_Length,Levenshtein_Brand,Digit_Ratio,Entropy_Subdomain,Has_IP_Address,Suspicious_TLD,Brand_In_Subdomain,Has_At_Symbol,Special_Char_Ratio,Prefix_Suffix_Domain,Favicon_Match,External_Links_Ratio,Has_Popup,Has_External_Form_Submit,Has_Submit_Button,Has_Password_Field,Total_IFrames,Has_Hidden_IFrame,Redirect_Count,TLS_Issuer_Reputation,Domain_Age,Certificate_Age,Is_Top_1M_Domain
-https://www.newtylerbarbercollege.edu,2025-12-25T08:20:10.606463,success,1,1,0,0,37,10,0.0,-0.0,0,0,0,0,0.1351,0,1,1.0,1,0,0,0,0,0,0,1,-1,11,0.0
-https://www.texaspress.com,2025-12-25T08:20:12.312927,success,1,1,0,0,26,10,0.0,-0.0,0,0,0,0,0.1923,0,1,0.9706,0,0,0,0,0,0,0,1,-1,21,0.0
-https://www.pixeden.com,2025-12-25T08:20:14.124754,success,1,1,0,0,23,10,0.0,-0.0,0,0,0,0,0.2174,0,-1,-1.0,-1,-1,-1,-1,-1,-1,-1,1,-1,48,0.0
-https://www.tonyathomas.net,2025-12-25T08:20:14.134811,success,1,1,0,0,27,10,0.0,-0.0,0,0,0,0,0.1852,0,1,0.6765,1,0,0,0,2,0,0,1,-1,21,0.0
-https://organisasi.bulungan.go.id/public/tp9we5ck6je07zknp4vdncwj6c5xgcn4,2025-12-25T08:20:05.322528,success,1,2,0,1,73,10,0.1233,3.3264,0,0,0,0,0.1096,0,-1,-1.0,-1,-1,-1,-1,-1,-1,1,0,-1,42,0.0
-https://www.longbeachcomputerrepair.com,2025-12-25T08:20:12.219361,success,1,1,0,0,39,10,0.0,-0.0,0,0,0,0,0.1282,0,-1,-1.0,-1,-1,-1,-1,-1,-1,0,1,-1,31,0.0
-http://us-east1-black-octagon-376806.cloudfunctions.net/rednov/,2025-12-25T08:20:15.481856,success,0,1,0,0,63,10,0.1111,4.0733,0,0,0,0,0.1746,0,-1,-1.0,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,0.0
-https://www.innova.mu,2025-12-25T08:20:15.043770,success,1,1,0,0,21,10,0.0,-0.0,0,0,0,0,0.2381,0,-1,-1.0,-1,-1,-1,-1,-1,-1,1,1,-1,16,0.0
-https://www.taxiservicekharar.com,2025-12-25T08:20:10.388904,success,1,1,0,0,33,10,0.0,-0.0,0,0,0,0,0.1515,0,1,0.1667,0,0,0,0,0,0,0,1,-1,30,0.0
-http://redeem-microsoft-code.sitey.me,2025-12-25T08:20:03.271369,success,0,1,1,0,37,10,0.0,3.3088,0,0,1,0,0.1892,0,-1,-1.0,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,0.0
+import pandas as pd
+import numpy as np
+
+# --- CẤU HÌNH ---
+FILE_PATH = 'dataset_final_train.csv' 
+
+def report_quality():
+    print(f"🧐 ĐANG SOI CHI TIẾT BỘ DỮ LIỆU: {FILE_PATH}")
+    print("="*60)
+
+    try:
+        df = pd.read_csv(FILE_PATH)
+    except Exception as e:
+        print(f"❌ Không mở được file: {e}")
+        return
+
+    total = len(df)
+    
+    # 1. Kiểm tra Nhãn
+    l_counts = df['label'].value_counts()
+    print(f"📈 1. CÂN BẰNG NHÃN:")
+    print(f"   - Sạch (0):   {l_counts.get(0, 0):,} dòng")
+    print(f"   - Lừa đảo (1): {l_counts.get(1, 0):,} dòng")
+    print("-" * 30)
+
+    # 2. Kiểm tra SSL (Nhóm hạ tầng)
+    # Lỗi SSL thường trả về -1
+    ssl_fail = len(df[df['Certificate_Age'] == -1])
+    ssl_ok = total - ssl_fail
+    print(f"🛡️ 2. CHẤT LƯỢNG SSL:")
+    print(f"   - ✅ Lấy được thông tin: {ssl_ok:,} ({ssl_ok/total*100:.1f}%)")
+    print(f"   - ❌ Bị lỗi (-1):        {ssl_fail:,} ({ssl_fail/total*100:.1f}%)")
+    print("-" * 30)
+
+    # 3. Kiểm tra HTML (Nhóm nội dung)
+    # Nếu trích xuất thất bại, các cột này thường đều là 0
+    html_cols = ['Has_External_Form', 'Has_Submit_Button', 'Has_Password_Field', 'Brand_Impersonation']
+    # Một dòng bị coi là "Mù HTML" nếu tất cả các cột nội dung đều là 0
+    html_fail_mask = (df[html_cols] == 0).all(axis=1)
+    html_fail_count = html_fail_mask.sum()
+    html_ok = total - html_fail_count
+    print(f"🌐 3. CHẤT LƯỢNG NỘI DUNG (HTML):")
+    print(f"   - ✅ Lấy được nội dung: {html_ok:,} ({html_ok/total*100:.1f}%)")
+    print(f"   - ❌ Không lấy được (0): {html_fail_count:,} ({html_fail_count/total*100:.1f}%)")
+    print("-" * 30)
+
+    # 4. Phân loại "Sức khỏe" của từng dòng
+    # Dòng "Vàng": Có cả SSL và HTML
+    gold = len(df[(df['Certificate_Age'] != -1) & (~html_fail_mask)])
+    # Dòng "Bạc": Chỉ có SSL hoặc chỉ có HTML
+    silver = len(df[((df['Certificate_Age'] != -1) & (html_fail_mask)) | ((df['Certificate_Age'] == -1) & (~html_fail_mask))])
+    # Dòng "Rác": Cả hai đều lỗi (Chỉ còn mỗi 15 feature cấu trúc URL để học)
+    trash = len(df[(df['Certificate_Age'] == -1) & (html_fail_mask)])
+
+    print(f"💎 4. PHÂN LOẠI DỮ LIỆU ĐỂ TRAIN:")
+    print(f"   - 🥇 Loại Vàng (Cực tốt): {gold:,} dòng")
+    print(f"   - 🥈 Loại Bạc (Tạm ổn): {silver:,} dòng")
+    print(f"   - 🥉 Loại Rác (Cực yếu): {trash:,} dòng (Nên cân nhắc xóa)")
+    print("="*60)
+
+    print("\n💡 LỜI KHUYÊN:")
+    if trash / total > 0.5:
+        print("⚠️  CẢNH BÁO: Hơn 50% dữ liệu của bạn là 'Rác'.")
+        print("   Model sẽ chỉ học dựa trên cấu trúc URL, độ chính xác thực tế sẽ không cao.")
+    else:
+        print("✅ Bộ dữ liệu khá ổn. Bạn có thể tiến hành xử lý hậu kỳ và Train.")
+
+if __name__ == "__main__":
+    report_quality()
