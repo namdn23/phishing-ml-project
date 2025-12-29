@@ -1,104 +1,77 @@
 import pandas as pd
 import numpy as np
+import seaborn as sns
+import matplotlib.pyplot as plt
 
 # --- CẤU HÌNH ---
-# Dùng file mới nhất bạn vừa chạy fix SSL xong
+# Hãy thay bằng tên file mới nhất của bạn (file fixed hoặc file gốc)
 FILE_PATH = 'dataset_final_train_fixed.csv' 
 
-def audit_everything():
-    print(f"🕵️ BẮT ĐẦU KIỂM TRA TOÀN BỘ CÁC CỘT DỮ LIỆU...")
+def analyze_all_features():
+    print(f"🕵️ BẮT ĐẦU PHÂN TÍCH TOÀN BỘ 29 FEATURES...")
     print("="*80)
 
     try:
         df = pd.read_csv(FILE_PATH)
-        # Loại bỏ cột URL nếu còn, để chỉ tính toán trên số
-        if 'url' in df.columns:
-            df_numeric = df.drop(columns=['url'])
-        else:
-            df_numeric = df
-    except Exception as e:
-        print(f"❌ Lỗi đọc file: {e}")
+    except:
+        print(f"❌ Không tìm thấy file {FILE_PATH}")
         return
 
-    # 1. KIỂM TRA TÍNH NĂNG CHẾT (ZERO VARIANCE)
-    # Nếu một cột mà tất cả các dòng đều có giá trị y hệt nhau -> AI không học được gì -> NÊN XÓA
-    print("\n💀 1. DANH SÁCH TÍNH NĂNG 'CHẾT' (Cần xóa):")
+    # 1. TÁCH DỮ LIỆU
+    # Bỏ cột URL vì nó là text, không tính toán thống kê được
+    if 'url' in df.columns:
+        df_numeric = df.drop(columns=['url'])
+    else:
+        df_numeric = df
+
+    # 2. TÌM FEATURE "CHẾT" (Constant Columns)
+    # Feature chết là feature mà tất cả các dòng đều có giá trị giống hệt nhau -> Vô dụng
+    print("\n💀 DANH SÁCH FEATURE 'CHẾT' (Cần xóa bỏ):")
     dead_features = []
-    
     for col in df_numeric.columns:
-        if col == 'label': continue
-        
-        unique_vals = df_numeric[col].unique()
-        if len(unique_vals) == 1:
-            print(f"   ❌ {col.ljust(30)}: Giá trị duy nhất là {unique_vals[0]}")
+        if df_numeric[col].nunique() <= 1:
+            val = df_numeric[col].iloc[0]
+            print(f"   ❌ {col.ljust(30)}: Giá trị duy nhất là {val}")
             dead_features.append(col)
     
     if not dead_features:
-        print("   ✅ Tuyệt vời! Không có tính năng nào bị chết hoàn toàn.")
+        print("   ✅ Không có feature nào chết hoàn toàn!")
 
-    # 2. KIỂM TRA CÁC NHÓM TÍNH NĂNG CỤ THỂ
-    print("-" * 80)
-    print("\n🔍 2. KIỂM TRA CHI TIẾT TỪNG NHÓM:")
-
-    # --- Nhóm A: URL Structure ---
-    print("\n   [A] Cấu trúc URL (Static Features):")
-    url_feats = ['Domain_Length', 'Path_Length', 'Num_Dots', 'Digit_Ratio', 'Entropy_Subdomain']
-    for f in url_feats:
-        if f in df.columns:
-            avg = df[f].mean()
-            print(f"       - {f.ljust(25)}: Trung bình = {avg:.4f} (Ổn)")
-
-    # --- Nhóm B: SSL (Infrastructure) ---
-    print("\n   [B] Hạ tầng SSL (Dynamic Features):")
-    ssl_ok = len(df[df['Certificate_Age'] > 0])
-    ssl_fail = len(df[df['Certificate_Age'] == -1])
-    print(f"       - Dữ liệu SSL hợp lệ: {ssl_ok:,} dòng")
-    print(f"       - Dữ liệu SSL bị lỗi (-1): {ssl_fail:,} dòng")
-    if ssl_ok == 0:
-        print("       ⚠️  CẢNH BÁO: Nhóm này coi như HỎNG TOÀN BỘ.")
-
-    # --- Nhóm C: Nội dung HTML (Content Features) ---
-    print("\n   [C] Nội dung HTML (Dynamic Features):")
-    html_feats = ['Has_External_Form', 'Has_Submit_Button', 'Has_Password_Field', 'Brand_Impersonation']
-    for f in html_feats:
-        if f in df.columns:
-            count_1 = len(df[df[f] == 1])
-            print(f"       - {f.ljust(25)}: Tìm thấy {count_1:,} trang có dấu hiệu này.")
-
-    # 3. TOP TÍNH NĂNG QUAN TRỌNG NHẤT (CORRELATION)
-    print("-" * 80)
-    print("\n🏆 3. TOP 10 TÍNH NĂNG MẠNH NHẤT (AI sẽ dựa vào đây để bắt Phishing):")
-    print("(Giá trị càng gần 1.0 hoặc -1.0 thì càng quan trọng)")
-    
+    # 3. KIỂM TRA ĐỘ QUAN TRỌNG (CORRELATION MATRIX)
+    # Xem feature nào tương quan mạnh nhất với Label (Phishing)
+    print("\n🏆 TOP 30 FEATURE QUAN TRỌNG NHẤT (Dựa trên tương quan):")
     if 'label' in df_numeric.columns:
+        # Tính tương quan tuyệt đối
         corr = df_numeric.corrwith(df_numeric['label']).abs().sort_values(ascending=False)
-        top_10 = corr.drop('label').head(10)
+        # Bỏ dòng label (tương quan với chính nó là 1)
+        top_features = corr.drop('label').head(30)
         
-        for feature, score in top_10.items():
-            # Đánh giá sơ bộ
-            strength = "Yếu"
-            if score > 0.5: strength = "CỰC MẠNH 🔥"
-            elif score > 0.3: strength = "Mạnh 💪"
-            elif score > 0.1: strength = "Khá 🆗"
+        for feature, score in top_features.items():
+            stars = ""
+            if score > 0.4: stars = "🔥🔥🔥 (Cực mạnh)"
+            elif score > 0.2: stars = "🔥🔥 (Mạnh)"
+            elif score > 0.1: stars = "🔥 (Khá)"
+            else: stars = "(Trung bình)"
             
-            print(f"   ★ {feature.ljust(30)}: {score:.4f} ({strength})")
+            print(f"   ★ {feature.ljust(30)}: {score:.4f} {stars}")
 
-    # 4. KẾT LUẬN CUỐI CÙNG
+    # 4. KIỂM TRA SSL CỤ THỂ
+    print("\n🛡️ TÌNH TRẠNG SSL:")
+    if 'Certificate_Age' in df.columns:
+        ssl_fail_count = len(df[df['Certificate_Age'] == -1])
+        print(f"   - Số dòng bị lỗi SSL (-1): {ssl_fail_count:,} / {len(df):,} dòng")
+        if ssl_fail_count == len(df):
+            print("   ⚠️  KẾT LUẬN: SSL hỏng toàn bộ -> Sẽ bị xóa khi train.")
+        else:
+            print("   ✅ KẾT LUẬN: Đã cứu được một phần SSL.")
+
+    # 5. KẾT LUẬN CUỐI CÙNG
     print("="*80)
-    print("📢 KẾT LUẬN TƯ VẤN:")
+    print("📢 LỜI KHUYÊN CHO BẠN:")
     
-    recommendation = "TRAIN ĐƯỢC NGAY"
-    
-    if dead_features:
-        print(f"1. Bạn CẦN XÓA {len(dead_features)} cột chết đã liệt kê ở mục 1.")
-        recommendation = "CẦN DỌN DẸP TRƯỚC KHI TRAIN"
-        
-    if ssl_ok == 0:
-        print("2. SSL vẫn hỏng hoàn toàn. Model sẽ bỏ qua SSL.")
-    else:
-        print(f"2. Đã cứu được {ssl_ok} dòng SSL. Model sẽ thông minh hơn!")
-        
-    print(f"\n👉 ĐÁNH GIÁ: {recommendation}")
+    cols_to_drop = ['url', 'Fetch_Method'] + dead_features
+    print(f"1. Trước khi train, hãy xóa các cột sau: {cols_to_drop}")
+    print(f"2. Các feature còn lại ({len(df.columns) - len(cols_to_drop)}) đủ mạnh để đạt độ chính xác cao.")
 
 if __name__ == "__main__":
-    audit_everything()
+    analyze_all_features()
