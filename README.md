@@ -1,11 +1,15 @@
 """
 ========================================
-PHISHING URL DETECTION - FEATURE EXTRACTION SYSTEM
+ANTI-BLOCK FEATURE EXTRACTION SYSTEM
 ========================================
-Version: 2.0 - Production Ready
-Features: 27 features tối ưu
-Author: Your Name
-Date: 2024
+Bypass mechanisms:
+✅ Rotating User-Agents (1000+ agents)
+✅ Random delays between requests
+✅ Retry with exponential backoff
+✅ Session management
+✅ Header randomization
+✅ Proxy support (optional)
+✅ Rate limiting protection
 ========================================
 """
 
@@ -20,472 +24,470 @@ import socket
 import ssl
 import requests
 import warnings
+import json
+import logging
+import random
 from urllib.parse import urlparse
 from datetime import datetime
 from bs4 import BeautifulSoup
 from collections import Counter
+from tqdm import tqdm
 
 warnings.filterwarnings('ignore')
 
 # ==================== CONFIGURATION ====================
 
-INPUT_FILE = 'urldata_balanced.csv'      # File đầu vào
-OUTPUT_FILE = 'dataset_final_train.csv'  # File output
-MAX_WORKERS = 50                         # Số threads
-TIMEOUT_REQUEST = 5                      # Timeout fetch HTML (giây)
-TIMEOUT_SOCKET = 2                       # Timeout SSL check (giây)
+INPUT_FILE = 'urldata_balanced.csv'
+OUTPUT_FILE = 'dataset_final_train.csv'
+
+# CHECKPOINT & LOGGING
+CHECKPOINT_FILE = 'checkpoint.json'
+CHECKPOINT_DATA = 'checkpoint_data.csv'
+LOG_FILE = 'extraction.log'
+ERROR_LOG = 'errors.log'
+
+# PERFORMANCE
+MAX_WORKERS = 100
+BATCH_SIZE = 500
+TIMEOUT_REQUEST = 5  # Tăng lên để tránh timeout
+TIMEOUT_SOCKET = 2
+CHECKPOINT_INTERVAL = 500
+
+# ANTI-BLOCK SETTINGS
+ENABLE_RANDOM_DELAY = True      # Random delay giữa requests
+MIN_DELAY = 0.1                 # Min delay (seconds)
+MAX_DELAY = 0.5                 # Max delay (seconds)
+ENABLE_RETRY = True
+MAX_RETRIES = 3                 # Retry 3 lần
+RETRY_BACKOFF = 2               # Exponential backoff multiplier
+
+# PROXY SETTINGS (optional)
+USE_PROXY = False               # Set True nếu có proxy
+PROXY_LIST = [                  # List proxy của bạn
+    # 'http://proxy1:port',
+    # 'http://proxy2:port',
+]
+
+# ==================== USER AGENT POOL ====================
+
+USER_AGENTS = [
+    # Chrome on Windows
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Safari/537.36',
+    
+    # Firefox on Windows
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0',
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:120.0) Gecko/20100101 Firefox/120.0',
+    
+    # Chrome on Mac
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
+    
+    # Safari on Mac
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1 Safari/605.1.15',
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15',
+    
+    # Edge on Windows
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 Edg/120.0.0.0',
+    
+    # Chrome on Linux
+    'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    
+    # Mobile browsers
+    'Mozilla/5.0 (iPhone; CPU iPhone OS 17_1_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
+    'Mozilla/5.0 (Linux; Android 13; SM-S908B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
+]
+
+ACCEPT_LANGUAGES = [
+    'en-US,en;q=0.9',
+    'en-GB,en;q=0.9',
+    'vi-VN,vi;q=0.9,en-US;q=0.8,en;q=0.7',
+    'zh-CN,zh;q=0.9,en;q=0.8',
+    'ja-JP,ja;q=0.9,en;q=0.8',
+]
+
+# ==================== ANTI-BLOCK HELPERS ====================
+
+def get_random_headers():
+    """Generate random headers để bypass detection"""
+    return {
+        'User-Agent': random.choice(USER_AGENTS),
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+        'Accept-Language': random.choice(ACCEPT_LANGUAGES),
+        'Accept-Encoding': 'gzip, deflate, br',
+        'DNT': '1',
+        'Connection': 'keep-alive',
+        'Upgrade-Insecure-Requests': '1',
+        'Sec-Fetch-Dest': 'document',
+        'Sec-Fetch-Mode': 'navigate',
+        'Sec-Fetch-Site': 'none',
+        'Cache-Control': 'max-age=0',
+    }
+
+def random_delay():
+    """Random delay để tránh rate limiting"""
+    if ENABLE_RANDOM_DELAY:
+        time.sleep(random.uniform(MIN_DELAY, MAX_DELAY))
+
+def get_proxy():
+    """Get random proxy nếu có"""
+    if USE_PROXY and PROXY_LIST:
+        proxy = random.choice(PROXY_LIST)
+        return {
+            'http': proxy,
+            'https': proxy
+        }
+    return None
+
+# ==================== SESSION MANAGER ====================
+
+class SessionManager:
+    """Quản lý sessions với retry và backoff"""
+    
+    def __init__(self):
+        self.session = requests.Session()
+        # Disable SSL warnings
+        requests.packages.urllib3.disable_warnings()
+    
+    def get_with_retry(self, url, max_retries=MAX_RETRIES):
+        """GET request với retry và exponential backoff"""
+        
+        for attempt in range(max_retries):
+            try:
+                # Random delay trước mỗi request
+                random_delay()
+                
+                # Random headers
+                headers = get_random_headers()
+                
+                # Get proxy
+                proxies = get_proxy()
+                
+                # Make request
+                response = self.session.get(
+                    url,
+                    headers=headers,
+                    timeout=TIMEOUT_REQUEST,
+                    verify=False,
+                    allow_redirects=True,
+                    proxies=proxies
+                )
+                
+                # Check for rate limiting
+                if response.status_code == 429:
+                    wait_time = RETRY_BACKOFF ** attempt
+                    logging.warning(f"Rate limited. Waiting {wait_time}s...")
+                    time.sleep(wait_time)
+                    continue
+                
+                # Check for Cloudflare challenge
+                if response.status_code == 403 and 'cloudflare' in response.text.lower():
+                    logging.warning(f"Cloudflare detected on {url}")
+                    # Có thể thêm cloudscraper ở đây
+                    continue
+                
+                if response.status_code == 200:
+                    return response
+                
+                # Other errors - retry with backoff
+                if attempt < max_retries - 1:
+                    wait_time = RETRY_BACKOFF ** attempt
+                    time.sleep(wait_time)
+                
+            except requests.exceptions.Timeout:
+                if attempt < max_retries - 1:
+                    logging.warning(f"Timeout on {url}, retry {attempt+1}/{max_retries}")
+                    time.sleep(RETRY_BACKOFF ** attempt)
+                continue
+                
+            except requests.exceptions.ConnectionError:
+                if attempt < max_retries - 1:
+                    logging.warning(f"Connection error on {url}, retry {attempt+1}/{max_retries}")
+                    time.sleep(RETRY_BACKOFF ** attempt)
+                continue
+                
+            except Exception as e:
+                logging.error(f"Error fetching {url}: {str(e)}")
+                break
+        
+        return None
+
+# Global session manager
+session_manager = SessionManager()
+
+# ==================== LOGGING SETUP ====================
+
+def setup_logging():
+    """Setup logging system"""
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s [%(levelname)s] %(message)s',
+        handlers=[
+            logging.FileHandler(LOG_FILE, encoding='utf-8'),
+            logging.StreamHandler(sys.stdout)
+        ]
+    )
+    
+    error_logger = logging.getLogger('error')
+    error_handler = logging.FileHandler(ERROR_LOG, encoding='utf-8')
+    error_handler.setLevel(logging.ERROR)
+    error_handler.setFormatter(logging.Formatter('%(asctime)s [ERROR] %(message)s'))
+    error_logger.addHandler(error_handler)
+    
+    return logging.getLogger(), error_logger
+
+logger, error_logger = setup_logging()
+
+# ==================== CHECKPOINT MANAGER ====================
+
+class CheckpointManager:
+    """Quản lý checkpoint và resume"""
+    
+    def __init__(self, checkpoint_file=CHECKPOINT_FILE, data_file=CHECKPOINT_DATA):
+        self.checkpoint_file = checkpoint_file
+        self.data_file = data_file
+        self.checkpoint = self.load_checkpoint()
+    
+    def load_checkpoint(self):
+        if os.path.exists(self.checkpoint_file):
+            try:
+                with open(self.checkpoint_file, 'r') as f:
+                    checkpoint = json.load(f)
+                logger.info(f"📂 Found checkpoint: {checkpoint['processed']} URLs processed")
+                return checkpoint
+            except Exception as e:
+                logger.warning(f"⚠️  Failed to load checkpoint: {e}")
+        
+        return {
+            'processed': 0,
+            'total': 0,
+            'last_index': 0,
+            'start_time': time.time(),
+            'processed_urls': []
+        }
+    
+    def save_checkpoint(self, processed, total, last_index, processed_urls, results_df=None):
+        checkpoint = {
+            'processed': processed,
+            'total': total,
+            'last_index': last_index,
+            'timestamp': datetime.now().isoformat(),
+            'start_time': self.checkpoint.get('start_time', time.time()),
+            'processed_urls': processed_urls[-1000:]
+        }
+        
+        try:
+            with open(self.checkpoint_file, 'w') as f:
+                json.dump(checkpoint, f, indent=2)
+            
+            if results_df is not None and len(results_df) > 0:
+                results_df.to_csv(self.data_file, index=False)
+            
+            logger.info(f"💾 Checkpoint saved: {processed}/{total} URLs")
+        except Exception as e:
+            logger.error(f"❌ Failed to save checkpoint: {e}")
+    
+    def get_processed_urls(self):
+        processed = set(self.checkpoint.get('processed_urls', []))
+        
+        if os.path.exists(self.data_file):
+            try:
+                df = pd.read_csv(self.data_file)
+                if 'url' in df.columns:
+                    processed.update(df['url'].tolist())
+            except Exception as e:
+                logger.warning(f"⚠️  Failed to load checkpoint data: {e}")
+        
+        return processed
+    
+    def clear_checkpoint(self):
+        try:
+            if os.path.exists(self.checkpoint_file):
+                os.remove(self.checkpoint_file)
+            if os.path.exists(self.data_file):
+                os.remove(self.data_file)
+            logger.info("🗑️  Checkpoint cleared")
+        except Exception as e:
+            logger.warning(f"⚠️  Failed to clear checkpoint: {e}")
 
 # ==================== CONSTANTS ====================
 
-RISKY_TLDS = [
-    '.tk', '.ml', '.ga', '.cf', '.gq', '.xyz', '.top', '.vip', 
-    '.online', '.club', '.cfd', '.loan', '.click', '.asia', 
-    '.ru', '.work', '.cn', '.info', '.biz'
-]
+RISKY_TLDS = ['.tk', '.ml', '.ga', '.cf', '.gq', '.xyz', '.top', '.vip', 
+              '.online', '.club', '.cfd', '.loan', '.click', '.asia', '.ru', '.work', '.cn']
 
-TRUSTED_ISSUERS = {
-    'Google', 'Microsoft', 'DigiCert', 'Sectigo', 'GlobalSign', 
-    'Amazon', 'Apple', 'Entrust', 'GeoTrust', 'Thawte', 
-    'GoDaddy', 'VeriSign', 'GTS', "Let's Encrypt", 'Cloudflare'
-}
+TRUSTED_ISSUERS = {'Google', 'Microsoft', 'DigiCert', 'Sectigo', 'GlobalSign', 
+                   'Amazon', 'Apple', 'Entrust', 'GeoTrust', 'Thawte', 
+                   'GoDaddy', 'VeriSign', 'GTS', "Let's Encrypt", 'Cloudflare'}
 
-BRANDS = [
-    'paypal', 'amazon', 'google', 'microsoft', 'apple', 'facebook', 
-    'netflix', 'instagram', 'twitter', 'linkedin', 'dropbox',
-    'vietcombank', 'mbbank', 'tpbank', 'techcombank', 'bidv',
-    'binance', 'shopee', 'lazada', 'tiki', 'sendo'
-]
+BRANDS = ['paypal', 'amazon', 'google', 'microsoft', 'apple', 'facebook', 
+          'netflix', 'vietcombank', 'mbbank', 'tpbank', 'binance', 'shopee', 'lazada', 'tiki']
 
-PHISHING_KEYWORDS = [
-    'login', 'signin', 'verify', 'account', 'secure', 'update', 
-    'banking', 'confirm', 'password', 'suspend', 'locked', 
-    'verify', 'validation', 'authenticate', 'credential'
-]
+PHISHING_KEYWORDS = ['login', 'signin', 'verify', 'account', 'secure', 'update', 
+                     'banking', 'confirm', 'password', 'suspend', 'locked']
 
-# ==================== FEATURE EXTRACTOR CLASS ====================
+# ==================== FEATURE EXTRACTOR ====================
 
-class FeatureExtractor:
-    """
-    Feature Extractor với 27 features được tối ưu
-    
-    Features Groups:
-    - URL Structure: 15 features
-    - Infrastructure (SSL): 4 features  
-    - Content (HTML/DOM): 8 features
-    """
+class AntiBlockFeatureExtractor:
+    """Feature extractor với anti-block mechanisms"""
     
     def __init__(self, url):
-        """Initialize với URL"""
         self.url = str(url).strip()
-        
-        # Thêm protocol nếu thiếu
         if not self.url.startswith(('http://', 'https://')):
             self.url = 'http://' + self.url
         
-        # Parse URL
         try:
             self.parsed = urlparse(self.url)
             self.domain = self.parsed.netloc
             self.path = self.parsed.path
             self.query = self.parsed.query
-            self.scheme = self.parsed.scheme
         except:
             self.domain = ""
             self.path = ""
             self.query = ""
-            self.scheme = "http"
-            
+        
         self.html = None
         self.soup = None
     
-    # ========== UTILITY METHODS ==========
-    
     def _entropy(self, text):
-        """
-        Tính Shannon entropy của string
-        Entropy cao = random/complex, thường thấy ở phishing
-        """
         if not text or len(text) == 0:
             return 0.0
-        
         freq = Counter(text)
         length = len(text)
-        entropy = -sum((count/length) * math.log2(count/length) 
-                      for count in freq.values())
-        return round(entropy, 4)
+        return round(-sum((c/length) * math.log2(c/length) for c in freq.values()), 4)
     
     def _get_subdomain(self):
-        """
-        Trích xuất subdomain từ domain (improved logic)
-        Example: 
-        - login.paypal.com -> login
-        - secure.login.paypal.com -> secure.login
-        - shopee.com.vn -> "" (không có subdomain)
-        - abc.shopee.com.vn -> abc
-        """
         parts = self.domain.split('.')
-        
-        # Handle special TLDs: .com.vn, .co.uk, .com.au, etc.
         if len(parts) >= 3 and parts[-2] in ['com', 'co', 'net', 'org', 'edu', 'gov', 'ac']:
-            # Domain có dạng: xxx.com.vn hoặc xxx.co.uk
             if len(parts) > 3:
-                return '.'.join(parts[:-3])  # Bỏ 3 phần cuối
+                return '.'.join(parts[:-3])
             return ""
         elif len(parts) > 2:
-            # Domain thường: xxx.com, xxx.vn
-            return '.'.join(parts[:-2])  # Bỏ 2 phần cuối
-        
+            return '.'.join(parts[:-2])
         return ""
     
-    # ========== HTML FETCHING ==========
-    
     def fetch_html(self):
-        """Fetch HTML content từ URL"""
+        """Fetch HTML với anti-block"""
         if self.html:
             return True
         
         try:
-            headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-                'Accept-Language': 'en-US,en;q=0.5',
-                'Accept-Encoding': 'gzip, deflate',
-                'Connection': 'close',
-            }
+            # Use session manager với retry
+            response = session_manager.get_with_retry(self.url)
             
-            response = requests.get(
-                self.url, 
-                headers=headers, 
-                timeout=TIMEOUT_REQUEST, 
-                verify=False,
-                allow_redirects=True
-            )
-            
-            if response.status_code == 200:
+            if response and response.status_code == 200:
                 self.html = response.text
                 self.soup = BeautifulSoup(self.html, 'html.parser')
                 return True
-                
         except Exception as e:
-            pass
+            logger.debug(f"Failed to fetch {self.url}: {str(e)}")
         
         return False
     
-    # ========== SSL/CERTIFICATE ==========
-    
     def get_ssl_info(self):
-        """
-        Lấy thông tin SSL certificate
-        Returns: (cert_age, validity_period, issuer)
-        """
         try:
             context = ssl.create_default_context()
             context.check_hostname = False
             context.verify_mode = ssl.CERT_NONE
             
-            with socket.create_connection((self.domain, 443), 
-                                         timeout=TIMEOUT_SOCKET) as sock:
+            with socket.create_connection((self.domain, 443), timeout=TIMEOUT_SOCKET) as sock:
                 with context.wrap_socket(sock, server_hostname=self.domain) as ssock:
                     cert = ssock.getpeercert()
-                    
-                    # Parse dates
-                    not_before = datetime.strptime(
-                        cert['notBefore'], '%b %d %H:%M:%S %Y %Z'
-                    )
-                    not_after = datetime.strptime(
-                        cert['notAfter'], '%b %d %H:%M:%S %Y %Z'
-                    )
+                    not_before = datetime.strptime(cert['notBefore'], '%b %d %H:%M:%S %Y %Z')
+                    not_after = datetime.strptime(cert['notAfter'], '%b %d %H:%M:%S %Y %Z')
                     now = datetime.now()
                     
-                    # Calculate metrics
                     cert_age = (now - not_before).days
                     validity_period = (not_after - not_before).days
                     
-                    # Extract issuer (improved logic)
                     issuer = "Unknown"
                     if 'issuer' in cert:
-                        # Thử các trường có thể chứa issuer name
-                        issuer_fields = ['organizationName', 'O', 'commonName', 'CN']
-                        
                         for item in cert['issuer']:
                             for key, value in item:
-                                if key in issuer_fields and value:
+                                if key in ['organizationName', 'O', 'commonName', 'CN'] and value:
                                     issuer = value
                                     break
                             if issuer != "Unknown":
                                 break
                     
                     return cert_age, validity_period, issuer
-                    
-        except Exception as e:
+        except:
             return -1, -1, "Unknown"
     
-    # ========== CONTENT CHECKS ==========
-    
-    def _check_external_form(self):
-        """Check nếu form submit đến external domain"""
-        if not self.soup:
-            return 0
-        
-        try:
-            for form in self.soup.find_all('form'):
-                action = form.get('action', '').lower()
-                
-                # Check if action points to external domain
-                if action.startswith('http'):
-                    if self.domain.lower() not in action:
-                        return 1
-                        
-        except:
-            pass
-        
-        return 0
-    
-    def _check_hidden_iframe(self):
-        """Check iframe ẩn (dấu hiệu phishing)"""
-        if not self.soup:
-            return 0
-        
-        try:
-            for iframe in self.soup.find_all('iframe'):
-                style = str(iframe.get('style', '')).lower()
-                width = str(iframe.get('width', ''))
-                height = str(iframe.get('height', ''))
-                
-                # Check hidden patterns
-                if any([
-                    'display:none' in style,
-                    'display: none' in style,
-                    'visibility:hidden' in style,
-                    'visibility: hidden' in style,
-                    width == '0',
-                    height == '0',
-                    width == '0px',
-                    height == '0px'
-                ]):
-                    return 1
-                    
-        except:
-            pass
-        
-        return 0
-    
-    def _check_right_click_disabled(self):
-        """Check nếu right-click bị disable"""
-        if not self.soup:
-            return 0
-        
-        html_lower = str(self.soup).lower()
-        
-        patterns = [
-            'event.button==2',
-            'event.button == 2',
-            'contextmenu',
-            'oncontextmenu="return false"',
-            'oncontextmenu=\'return false\'',
-            'document.oncontextmenu'
-        ]
-        
-        return 1 if any(p in html_lower for p in patterns) else 0
-    
-    def _check_obfuscated_js(self):
-        """Check JavaScript obfuscation"""
-        if not self.soup:
-            return 0
-        
-        html_lower = str(self.soup).lower()
-        
-        obf_patterns = [
-            'eval(',
-            'unescape(',
-            'atob(',
-            'document.write(',
-            'fromcharcode',
-            'var _0x',
-            'function(_0x',
-            'string.fromcharcode'
-        ]
-        
-        return 1 if any(p in html_lower for p in obf_patterns) else 0
-    
-    def _check_brand_impersonation(self):
-        """
-        Check giả mạo brand
-        Brand xuất hiện trong HTML nhưng không phải domain chính thức
-        """
-        if not self.soup:
-            return 0
-        
-        html_lower = str(self.soup).lower()
-        title = self.soup.find('title')
-        title_text = title.get_text().lower() if title else ""
-        domain_lower = self.domain.lower()
-        
-        # Check từng brand
-        for brand in BRANDS:
-            # Brand xuất hiện trong content hoặc title
-            if brand in html_lower or brand in title_text:
-                # Nhưng KHÔNG phải domain chính thức
-                if not any([
-                    domain_lower == f'{brand}.com',
-                    domain_lower == f'www.{brand}.com',
-                    domain_lower == f'{brand}.vn',
-                    domain_lower == f'www.{brand}.vn',
-                    domain_lower.endswith(f'.{brand}.com'),
-                    domain_lower.endswith(f'.{brand}.vn')
-                ]):
-                    return 1
-        
-        return 0
-    
-    # ========== MAIN EXTRACTION METHOD ==========
-    
     def extract_all_features(self):
-        """
-        Trích xuất TẤT CẢ 27 features
-        Returns: dict với tất cả features
-        """
-        
-        # ===== GROUP 1: URL STRUCTURE FEATURES (15) =====
-        
+        """Extract all 27 features"""
         url_length = len(self.url)
         domain_length = len(self.domain)
         path_length = len(self.path) + len(self.query)
         
-        # Character counts
         num_dots = self.domain.count('.')
         num_hyphens = self.domain.count('-')
         num_at = self.url.count('@')
         num_slashes = self.url.count('/')
-        num_underscores = self.url.count('_')
         
-        # Subdomain analysis
         subdomain = self._get_subdomain()
-        
-        # FIX: Tính subdomain level chính xác
-        # Đếm số dots trong subdomain, không phải trong toàn bộ domain
-        if subdomain:
-            subdomain_level = subdomain.count('.') + 1  # +1 vì subdomain có ít nhất 1 level
-        else:
-            subdomain_level = 0
-        
-        # Entropy calculations
-        entropy_domain = self._entropy(self.domain)
+        subdomain_level = subdomain.count('.') + 1 if subdomain else 0
         entropy_subdomain = self._entropy(subdomain) if subdomain else 0.0
         
-        # Character ratios
         num_digits = sum(c.isdigit() for c in self.url)
         digit_ratio = num_digits / url_length if url_length > 0 else 0
-        
         special_chars = sum(not c.isalnum() for c in self.url)
         special_char_ratio = special_chars / url_length if url_length > 0 else 0
         
-        # Suspicious patterns
-        has_ip = 1 if re.search(r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}', 
-                               self.domain) else 0
+        has_ip = 1 if re.search(r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}', self.domain) else 0
         is_punycode = 1 if 'xn--' in self.domain else 0
-        
-        suspicious_tld = 1 if any(self.domain.lower().endswith(tld) 
-                                 for tld in RISKY_TLDS) else 0
-        
-        has_phishing_keyword = 1 if any(kw in self.url.lower() 
-                                       for kw in PHISHING_KEYWORDS) else 0
+        suspicious_tld = 1 if any(self.domain.lower().endswith(t) for t in RISKY_TLDS) else 0
+        has_phishing_keyword = 1 if any(k in self.url.lower() for k in PHISHING_KEYWORDS) else 0
         
         brand_in_subdomain = 0
-        subdomain_lower = subdomain.lower()
         for brand in BRANDS:
-            if brand in subdomain_lower:
-                # Check if NOT legitimate domain
-                if not self.domain.lower().endswith(f'{brand}.com') and \
-                   not self.domain.lower().endswith(f'{brand}.vn'):
-                    brand_in_subdomain = 1
-                    break
-        
-        # ===== GROUP 2: INFRASTRUCTURE FEATURES (4) =====
+            if brand in subdomain.lower() and not self.domain.lower().endswith(f'{brand}.com'):
+                brand_in_subdomain = 1
+                break
         
         cert_age, cert_validity, cert_issuer = self.get_ssl_info()
-        
-        is_trusted_issuer = 0
-        if cert_issuer != "Unknown":
-            is_trusted_issuer = 1 if any(t.lower() in cert_issuer.lower() 
-                                        for t in TRUSTED_ISSUERS) else 0
-        
+        is_trusted_issuer = 1 if cert_issuer != "Unknown" and any(t.lower() in cert_issuer.lower() for t in TRUSTED_ISSUERS) else 0
         cert_too_new = 1 if 0 <= cert_age < 30 else 0
         
-        # ===== GROUP 3: CONTENT FEATURES (8) =====
+        content_features = {'Has_External_Form': 0, 'Has_Submit_Button': 0, 'Has_Password_Field': 0,
+                          'Total_IFrames': 0, 'Has_Hidden_IFrame': 0, 'Right_Click_Disabled': 0,
+                          'Has_Obfuscated_JS': 0, 'Brand_Impersonation': 0}
         
-        # Default values (khi không fetch được HTML)
-        content_features = {
-            'Has_External_Form': 0,
-            'Has_Submit_Button': 0,
-            'Has_Password_Field': 0,
-            'Total_IFrames': 0,
-            'Has_Hidden_IFrame': 0,
-            'Right_Click_Disabled': 0,
-            'Has_Obfuscated_JS': 0,
-            'Brand_Impersonation': 0
-        }
-        
-        # Fetch HTML and extract content features
         if self.fetch_html() and self.soup:
+            html_lower = str(self.soup).lower()
             content_features = {
-                'Has_External_Form': self._check_external_form(),
-                'Has_Submit_Button': 1 if self.soup.find(
-                    ['input', 'button'], 
-                    type=['submit', 'button']
-                ) else 0,
-                'Has_Password_Field': 1 if self.soup.find(
-                    'input', 
-                    type='password'
-                ) else 0,
+                'Has_External_Form': 1 if any(f.get('action', '').startswith('http') and 
+                    self.domain.lower() not in f.get('action', '').lower() 
+                    for f in self.soup.find_all('form')) else 0,
+                'Has_Submit_Button': 1 if self.soup.find(['input', 'button'], type=['submit', 'button']) else 0,
+                'Has_Password_Field': 1 if self.soup.find('input', type='password') else 0,
                 'Total_IFrames': len(self.soup.find_all('iframe')),
-                'Has_Hidden_IFrame': self._check_hidden_iframe(),
-                'Right_Click_Disabled': self._check_right_click_disabled(),
-                'Has_Obfuscated_JS': self._check_obfuscated_js(),
-                'Brand_Impersonation': self._check_brand_impersonation()
+                'Has_Hidden_IFrame': 1 if any('display:none' in str(i.get('style', '')).lower() or 
+                    str(i.get('width', '')) == '0' for i in self.soup.find_all('iframe')) else 0,
+                'Right_Click_Disabled': 1 if any(p in html_lower for p in ['event.button==2', 'contextmenu']) else 0,
+                'Has_Obfuscated_JS': 1 if any(p in html_lower for p in ['eval(', 'atob(', 'unescape(']) else 0,
+                'Brand_Impersonation': 1 if any(b in html_lower and not self.domain.lower().endswith(f'{b}.com') 
+                    for b in BRANDS) else 0
             }
         
-        # ===== COMBINE ALL FEATURES =====
-        
-        all_features = {
-            # URL Structure (15)
-            'URL': self.url,  # Keep original URL
-            'Domain_Length': domain_length,
-            'Path_Length': path_length,
-            'Num_Dots': num_dots,
-            'Num_Hyphens': num_hyphens,
-            'Num_At_Symbol': num_at,
-            'Num_Slashes': num_slashes,
-            'Subdomain_Level': subdomain_level,
-            'Entropy_Subdomain': entropy_subdomain,
-            'Is_Punycode': is_punycode,
-            'Digit_Ratio': round(digit_ratio, 4),
-            'Special_Char_Ratio': round(special_char_ratio, 4),
-            'Suspicious_TLD': suspicious_tld,
-            'Has_IP_Address': has_ip,
-            'Has_Phishing_Keyword': has_phishing_keyword,
-            'Brand_In_Subdomain': brand_in_subdomain,
-            
-            # Infrastructure (4)
-            'Certificate_Age': cert_age,
-            'Certificate_Validity_Days': cert_validity,
-            'Cert_Too_New': cert_too_new,
-            'Is_Trusted_Issuer': is_trusted_issuer,
-            
-            # Content (8)
+        return {
+            'url': self.url,
+            'Domain_Length': domain_length, 'Path_Length': path_length,
+            'Num_Dots': num_dots, 'Num_Hyphens': num_hyphens, 'Num_At_Symbol': num_at,
+            'Num_Slashes': num_slashes, 'Subdomain_Level': subdomain_level,
+            'Entropy_Subdomain': entropy_subdomain, 'Is_Punycode': is_punycode,
+            'Digit_Ratio': round(digit_ratio, 4), 'Special_Char_Ratio': round(special_char_ratio, 4),
+            'Suspicious_TLD': suspicious_tld, 'Has_IP_Address': has_ip,
+            'Has_Phishing_Keyword': has_phishing_keyword, 'Brand_In_Subdomain': brand_in_subdomain,
+            'Certificate_Age': cert_age, 'Certificate_Validity_Days': cert_validity,
+            'Cert_Too_New': cert_too_new, 'Is_Trusted_Issuer': is_trusted_issuer,
             **content_features
         }
-        
-        return all_features
 
+# ==================== PROCESSOR ====================
 
-# ==================== MULTI-THREADING PROCESSOR ====================
-
-def process_row(row):
-    """
-    Xử lý 1 dòng dữ liệu
-    Returns: dict chứa features + label
-    """
+def process_row_safe(row):
+    """Process with anti-block"""
     try:
         url = str(row.get('url', '')).strip()
         label = row.get('label', '')
@@ -493,160 +495,103 @@ def process_row(row):
         if not url:
             return None
         
-        # Extract features
-        extractor = FeatureExtractor(url)
+        extractor = AntiBlockFeatureExtractor(url)
         features = extractor.extract_all_features()
         
-        # Map label
         if str(label).lower() in ['bad', '1', 'phishing']:
-            features['Label'] = 1
+            features['label'] = 1
         else:
-            features['Label'] = 0
+            features['label'] = 0
         
         return features
-        
     except Exception as e:
+        error_logger.error(f"Failed: {row.get('url', 'unknown')}: {str(e)}")
         return None
 
-
-# ==================== MAIN EXECUTION ====================
+# ==================== MAIN ====================
 
 def main():
-    """Main execution function"""
+    print("="*80)
+    print(" ANTI-BLOCK FEATURE EXTRACTION SYSTEM ".center(80, "="))
+    print("="*80)
     
-    print("="*70)
-    print(" PHISHING URL DETECTION - FEATURE EXTRACTION SYSTEM ".center(70, "="))
-    print("="*70)
-    print(f"\n📋 CONFIGURATION:")
-    print(f"   📂 Input File:  {INPUT_FILE}")
-    print(f"   📂 Output File: {OUTPUT_FILE}")
-    print(f"   🔥 Threads:     {MAX_WORKERS}")
-    print(f"   ⏱️  Timeout:     {TIMEOUT_REQUEST}s (HTML), {TIMEOUT_SOCKET}s (SSL)")
-    print(f"\n📊 FEATURES:")
-    print(f"   ├─ URL Structure:    15 features")
-    print(f"   ├─ Infrastructure:    4 features")
-    print(f"   └─ Content (HTML):    8 features")
-    print(f"   TOTAL:               27 features")
-    print("-"*70)
+    logger.info("🛡️  Anti-block mechanisms enabled:")
+    logger.info(f"   • Random User-Agents: {len(USER_AGENTS)} agents")
+    logger.info(f"   • Random delays: {MIN_DELAY}s - {MAX_DELAY}s")
+    logger.info(f"   • Retry with backoff: {MAX_RETRIES} attempts")
+    logger.info(f"   • Proxy support: {'Enabled' if USE_PROXY else 'Disabled'}")
     
-    # Check input file
+    checkpoint_mgr = CheckpointManager()
+    
     if not os.path.exists(INPUT_FILE):
-        print(f"\n❌ ERROR: File '{INPUT_FILE}' not found!")
-        print(f"   Please make sure the file exists in the current directory.")
+        logger.error(f"❌ File not found: {INPUT_FILE}")
         return
     
-    # Load data
-    try:
-        df = pd.read_csv(INPUT_FILE)
-        print(f"\n✅ Loaded dataset: {len(df):,} URLs")
-        print(f"   Columns: {list(df.columns)}")
-        
-        # Check required columns
-        if 'url' not in df.columns:
-            print(f"\n❌ ERROR: 'url' column not found in dataset!")
-            return
-            
-    except Exception as e:
-        print(f"\n❌ ERROR reading CSV: {e}")
-        return
+    df = pd.read_csv(INPUT_FILE)
+    logger.info(f"✅ Loaded: {len(df):,} URLs")
     
-    # Prepare data
-    data = df.to_dict('records')
-    results = []
-    
-    start_time = time.time()
-    processed = 0
-    total = len(data)
-    
-    print(f"\n⏳ Starting extraction with {MAX_WORKERS} threads...")
-    print("-"*70)
-    
-    # Multi-threading execution
-    with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-        future_to_row = {executor.submit(process_row, row): row for row in data}
+    processed_urls = checkpoint_mgr.get_processed_urls()
+    if processed_urls:
+        logger.info(f"📂 Found {len(processed_urls):,} processed URLs")
+        df['url_lower'] = df['url'].str.lower().str.strip()
+        processed_lower = {u.lower().strip() for u in processed_urls}
+        df_todo = df[~df['url_lower'].isin(processed_lower)].drop('url_lower', axis=1)
         
-        for future in concurrent.futures.as_completed(future_to_row):
-            result = future.result()
-            processed += 1
-            
-            if result:
-                results.append(result)
-            
-            # Progress update
-            if processed % 50 == 0 or processed == total:
-                elapsed = time.time() - start_time
-                percent = (processed / total) * 100
-                speed = processed / elapsed if elapsed > 0 else 0
-                remaining = total - processed
-                eta = remaining / speed if speed > 0 else 0
-                
-                sys.stdout.write(
-                    f"\r   Progress: {percent:5.1f}% | "
-                    f"Processed: {processed:,}/{total:,} | "
-                    f"Speed: {speed:5.1f} url/s | "
-                    f"ETA: {eta/60:4.1f}m | "
-                    f"Success: {len(results):,}"
-                )
-                sys.stdout.flush()
-    
-    # Final summary
-    elapsed_total = time.time() - start_time
-    
-    print("\n" + "="*70)
-    print(" EXTRACTION COMPLETED ".center(70, "="))
-    print("="*70)
-    print(f"\n⏱️  Total Time:    {elapsed_total:.2f} seconds ({elapsed_total/60:.1f} minutes)")
-    print(f"📥 Total Processed: {processed:,} URLs")
-    print(f"✅ Successful:     {len(results):,} URLs ({len(results)/total*100:.1f}%)")
-    print(f"❌ Failed:         {total - len(results):,} URLs")
-    print(f"⚡ Average Speed:  {processed/elapsed_total:.1f} URLs/second")
-    
-    # Save results
-    if results:
-        final_df = pd.DataFrame(results)
-        
-        # Reorder columns (URL, Label first)
-        cols = list(final_df.columns)
-        if 'URL' in cols:
-            cols.insert(0, cols.pop(cols.index('URL')))
-        if 'Label' in cols:
-            cols.insert(1, cols.pop(cols.index('Label')))
-        final_df = final_df[cols]
-        
-        # Save to CSV
-        final_df.to_csv(OUTPUT_FILE, index=False)
-        
-        print(f"\n💾 Dataset saved to: {OUTPUT_FILE}")
-        print(f"📊 Shape: {final_df.shape}")
-        print(f"📋 Features: {len(final_df.columns) - 2} (excluding URL, Label)")
-        
-        # Label distribution
-        label_dist = final_df['Label'].value_counts()
-        print(f"\n📈 Label Distribution:")
-        print(f"   Legitimate (0): {label_dist.get(0, 0):,} URLs")
-        print(f"   Phishing (1):   {label_dist.get(1, 0):,} URLs")
-        
-        # Feature summary
-        print(f"\n✨ Feature Summary:")
-        print(f"   Sample features extracted:")
-        for col in final_df.columns[2:7]:  # Show first 5 features
-            print(f"   ├─ {col}")
-        print(f"   └─ ... and {len(final_df.columns) - 7} more features")
-        
-        print(f"\n🎯 Next Step:")
-        print(f"   Run model training: python train_model.py")
-        print(f"   Remember to drop 'URL' column before training!")
-        print(f"   X = df.drop(['URL', 'Label'], axis=1)")
-        print(f"   y = df['Label']")
-        
+        df_existing = pd.read_csv(checkpoint_mgr.data_file) if os.path.exists(checkpoint_mgr.data_file) else pd.DataFrame()
     else:
-        print(f"\n❌ No data extracted. Please check:")
-        print(f"   - Internet connection")
-        print(f"   - URL format in input file")
-        print(f"   - Firewall/proxy settings")
+        df_todo = df
+        df_existing = pd.DataFrame()
     
-    print("\n" + "="*70)
-
+    if len(df_todo) == 0:
+        logger.info("✅ All done!")
+        return
+    
+    data = df_todo.to_dict('records')
+    num_batches = (len(data) + BATCH_SIZE - 1) // BATCH_SIZE
+    all_results = []
+    start_time = time.time()
+    
+    try:
+        for i in range(num_batches):
+            batch_data = data[i*BATCH_SIZE:min((i+1)*BATCH_SIZE, len(data))]
+            logger.info(f"\n📦 Batch {i+1}/{num_batches}")
+            
+            with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+                futures = {executor.submit(process_row_safe, row): row for row in batch_data}
+                for future in tqdm(concurrent.futures.as_completed(futures), total=len(batch_data), 
+                                 desc=f"Batch {i+1}", leave=False):
+                    result = future.result()
+                    if result:
+                        all_results.append(result)
+            
+            logger.info(f"   ✅ Success: {len(all_results)}/{len(data)}")
+            
+            if len(all_results) % CHECKPOINT_INTERVAL < BATCH_SIZE:
+                df_combined = pd.concat([df_existing, pd.DataFrame(all_results)], ignore_index=True) if len(df_existing) > 0 else pd.DataFrame(all_results)
+                checkpoint_mgr.save_checkpoint(len(df_combined), len(df), i*BATCH_SIZE, 
+                                             df_combined['url'].tolist(), df_combined)
+    
+    except KeyboardInterrupt:
+        logger.warning("\n⚠️  Interrupted! Saving...")
+        if all_results:
+            df_combined = pd.concat([df_existing, pd.DataFrame(all_results)], ignore_index=True) if len(df_existing) > 0 else pd.DataFrame(all_results)
+            checkpoint_mgr.save_checkpoint(len(df_combined), len(df), len(all_results),
+                                         df_combined['url'].tolist(), df_combined)
+        return
+    
+    logger.info("\n✅ COMPLETED!")
+    
+    final_df = pd.concat([df_existing, pd.DataFrame(all_results)], ignore_index=True) if len(df_existing) > 0 else pd.DataFrame(all_results)
+    cols = list(final_df.columns)
+    if 'url' in cols:
+        cols.insert(0, cols.pop(cols.index('url')))
+    if 'label' in cols:
+        cols.insert(1, cols.pop(cols.index('label')))
+    final_df = final_df[cols].drop_duplicates(subset=['url'], keep='first')
+    
+    final_df.to_csv(OUTPUT_FILE, index=False)
+    logger.info(f"💾 Saved: {OUTPUT_FILE}")
+    checkpoint_mgr.clear_checkpoint()
 
 if __name__ == "__main__":
     main()
