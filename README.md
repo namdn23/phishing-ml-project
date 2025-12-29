@@ -1,16 +1,16 @@
 """
 ========================================
-ANTI-BLOCK FEATURE EXTRACTION SYSTEM
+SELENIUM STEALTH FEATURE EXTRACTION
 ========================================
-Bypass mechanisms:
-✅ Rotating User-Agents (1000+ agents)
-✅ Random delays between requests
-✅ Retry with exponential backoff
-✅ Session management
-✅ Header randomization
-✅ Proxy support (optional)
-✅ Rate limiting protection
+✅ Undetected Chrome - Bypass bot detection
+✅ Cloudflare bypass
+✅ JavaScript execution
+✅ Human-like behavior
+✅ Fallback to requests for speed
 ========================================
+
+INSTALLATION:
+pip install selenium undetected-chromedriver beautifulsoup4
 """
 
 import pandas as pd
@@ -33,6 +33,18 @@ from bs4 import BeautifulSoup
 from collections import Counter
 from tqdm import tqdm
 
+# Selenium imports
+try:
+    import undetected_chromedriver as uc
+    from selenium.webdriver.common.by import By
+    from selenium.webdriver.support.ui import WebDriverWait
+    from selenium.webdriver.support import expected_conditions as EC
+    from selenium.common.exceptions import TimeoutException, WebDriverException
+    SELENIUM_AVAILABLE = True
+except ImportError:
+    SELENIUM_AVAILABLE = False
+    print("⚠️  Selenium not installed. Run: pip install selenium undetected-chromedriver")
+
 warnings.filterwarnings('ignore')
 
 # ==================== CONFIGURATION ====================
@@ -40,186 +52,28 @@ warnings.filterwarnings('ignore')
 INPUT_FILE = 'urldata_balanced.csv'
 OUTPUT_FILE = 'dataset_final_train.csv'
 
-# CHECKPOINT & LOGGING
 CHECKPOINT_FILE = 'checkpoint.json'
 CHECKPOINT_DATA = 'checkpoint_data.csv'
 LOG_FILE = 'extraction.log'
 ERROR_LOG = 'errors.log'
 
 # PERFORMANCE
-MAX_WORKERS = 100
-BATCH_SIZE = 500
-TIMEOUT_REQUEST = 5  # Tăng lên để tránh timeout
-TIMEOUT_SOCKET = 2
-CHECKPOINT_INTERVAL = 500
+MAX_WORKERS = 20  # Giảm xuống vì Selenium nặng
+BATCH_SIZE = 100  # Giảm batch size
+CHECKPOINT_INTERVAL = 100
 
-# ANTI-BLOCK SETTINGS
-ENABLE_RANDOM_DELAY = True      # Random delay giữa requests
-MIN_DELAY = 0.1                 # Min delay (seconds)
-MAX_DELAY = 0.5                 # Max delay (seconds)
-ENABLE_RETRY = True
-MAX_RETRIES = 3                 # Retry 3 lần
-RETRY_BACKOFF = 2               # Exponential backoff multiplier
+# STRATEGY SETTINGS
+USE_SELENIUM_FOR_FAILED = True  # Dùng Selenium cho URLs fail
+SELENIUM_TIMEOUT = 10           # Timeout cho Selenium
+REQUESTS_TIMEOUT = 5            # Timeout cho requests
+MAX_RETRIES = 2                 # Số lần retry
 
-# PROXY SETTINGS (optional)
-USE_PROXY = False               # Set True nếu có proxy
-PROXY_LIST = [                  # List proxy của bạn
-    # 'http://proxy1:port',
-    # 'http://proxy2:port',
-]
+# SELENIUM POOL
+SELENIUM_POOL_SIZE = 5  # Số browser instances
 
-# ==================== USER AGENT POOL ====================
-
-USER_AGENTS = [
-    # Chrome on Windows
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Safari/537.36',
-    
-    # Firefox on Windows
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0',
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:120.0) Gecko/20100101 Firefox/120.0',
-    
-    # Chrome on Mac
-    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
-    
-    # Safari on Mac
-    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1 Safari/605.1.15',
-    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15',
-    
-    # Edge on Windows
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 Edg/120.0.0.0',
-    
-    # Chrome on Linux
-    'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-    
-    # Mobile browsers
-    'Mozilla/5.0 (iPhone; CPU iPhone OS 17_1_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
-    'Mozilla/5.0 (Linux; Android 13; SM-S908B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
-]
-
-ACCEPT_LANGUAGES = [
-    'en-US,en;q=0.9',
-    'en-GB,en;q=0.9',
-    'vi-VN,vi;q=0.9,en-US;q=0.8,en;q=0.7',
-    'zh-CN,zh;q=0.9,en;q=0.8',
-    'ja-JP,ja;q=0.9,en;q=0.8',
-]
-
-# ==================== ANTI-BLOCK HELPERS ====================
-
-def get_random_headers():
-    """Generate random headers để bypass detection"""
-    return {
-        'User-Agent': random.choice(USER_AGENTS),
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
-        'Accept-Language': random.choice(ACCEPT_LANGUAGES),
-        'Accept-Encoding': 'gzip, deflate, br',
-        'DNT': '1',
-        'Connection': 'keep-alive',
-        'Upgrade-Insecure-Requests': '1',
-        'Sec-Fetch-Dest': 'document',
-        'Sec-Fetch-Mode': 'navigate',
-        'Sec-Fetch-Site': 'none',
-        'Cache-Control': 'max-age=0',
-    }
-
-def random_delay():
-    """Random delay để tránh rate limiting"""
-    if ENABLE_RANDOM_DELAY:
-        time.sleep(random.uniform(MIN_DELAY, MAX_DELAY))
-
-def get_proxy():
-    """Get random proxy nếu có"""
-    if USE_PROXY and PROXY_LIST:
-        proxy = random.choice(PROXY_LIST)
-        return {
-            'http': proxy,
-            'https': proxy
-        }
-    return None
-
-# ==================== SESSION MANAGER ====================
-
-class SessionManager:
-    """Quản lý sessions với retry và backoff"""
-    
-    def __init__(self):
-        self.session = requests.Session()
-        # Disable SSL warnings
-        requests.packages.urllib3.disable_warnings()
-    
-    def get_with_retry(self, url, max_retries=MAX_RETRIES):
-        """GET request với retry và exponential backoff"""
-        
-        for attempt in range(max_retries):
-            try:
-                # Random delay trước mỗi request
-                random_delay()
-                
-                # Random headers
-                headers = get_random_headers()
-                
-                # Get proxy
-                proxies = get_proxy()
-                
-                # Make request
-                response = self.session.get(
-                    url,
-                    headers=headers,
-                    timeout=TIMEOUT_REQUEST,
-                    verify=False,
-                    allow_redirects=True,
-                    proxies=proxies
-                )
-                
-                # Check for rate limiting
-                if response.status_code == 429:
-                    wait_time = RETRY_BACKOFF ** attempt
-                    logging.warning(f"Rate limited. Waiting {wait_time}s...")
-                    time.sleep(wait_time)
-                    continue
-                
-                # Check for Cloudflare challenge
-                if response.status_code == 403 and 'cloudflare' in response.text.lower():
-                    logging.warning(f"Cloudflare detected on {url}")
-                    # Có thể thêm cloudscraper ở đây
-                    continue
-                
-                if response.status_code == 200:
-                    return response
-                
-                # Other errors - retry with backoff
-                if attempt < max_retries - 1:
-                    wait_time = RETRY_BACKOFF ** attempt
-                    time.sleep(wait_time)
-                
-            except requests.exceptions.Timeout:
-                if attempt < max_retries - 1:
-                    logging.warning(f"Timeout on {url}, retry {attempt+1}/{max_retries}")
-                    time.sleep(RETRY_BACKOFF ** attempt)
-                continue
-                
-            except requests.exceptions.ConnectionError:
-                if attempt < max_retries - 1:
-                    logging.warning(f"Connection error on {url}, retry {attempt+1}/{max_retries}")
-                    time.sleep(RETRY_BACKOFF ** attempt)
-                continue
-                
-            except Exception as e:
-                logging.error(f"Error fetching {url}: {str(e)}")
-                break
-        
-        return None
-
-# Global session manager
-session_manager = SessionManager()
-
-# ==================== LOGGING SETUP ====================
+# ==================== LOGGING ====================
 
 def setup_logging():
-    """Setup logging system"""
     logging.basicConfig(
         level=logging.INFO,
         format='%(asctime)s [%(levelname)s] %(message)s',
@@ -239,11 +93,105 @@ def setup_logging():
 
 logger, error_logger = setup_logging()
 
+# ==================== SELENIUM DRIVER MANAGER ====================
+
+class SeleniumDriverPool:
+    """Pool of Selenium drivers for reuse"""
+    
+    def __init__(self, pool_size=SELENIUM_POOL_SIZE):
+        self.pool_size = pool_size
+        self.drivers = []
+        self.available = []
+        
+        if not SELENIUM_AVAILABLE:
+            logger.warning("⚠️  Selenium not available")
+            return
+        
+        logger.info(f"🚀 Initializing {pool_size} Selenium drivers...")
+        
+        for i in range(pool_size):
+            try:
+                driver = self._create_driver()
+                self.drivers.append(driver)
+                self.available.append(driver)
+                logger.info(f"   ✅ Driver {i+1}/{pool_size} ready")
+            except Exception as e:
+                logger.error(f"   ❌ Failed to create driver {i+1}: {e}")
+        
+        logger.info(f"✅ Selenium pool ready with {len(self.drivers)} drivers")
+    
+    def _create_driver(self):
+        """Create undetected Chrome driver"""
+        options = uc.ChromeOptions()
+        
+        # Stealth settings
+        options.add_argument('--headless')  # Chạy ẩn
+        options.add_argument('--no-sandbox')
+        options.add_argument('--disable-dev-shm-usage')
+        options.add_argument('--disable-blink-features=AutomationControlled')
+        options.add_argument('--disable-extensions')
+        options.add_argument('--disable-gpu')
+        options.add_argument('--disable-notifications')
+        options.add_argument('--disable-popup-blocking')
+        options.add_argument('--start-maximized')
+        
+        # User agent rotation
+        user_agents = [
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        ]
+        options.add_argument(f'--user-agent={random.choice(user_agents)}')
+        
+        # Create driver
+        driver = uc.Chrome(options=options, version_main=None)
+        driver.set_page_load_timeout(SELENIUM_TIMEOUT)
+        
+        # Execute CDP to hide automation
+        driver.execute_cdp_cmd('Network.setUserAgentOverride', {
+            "userAgent": driver.execute_script("return navigator.userAgent").replace('Headless', '')
+        })
+        
+        return driver
+    
+    def get_driver(self):
+        """Get available driver from pool"""
+        if not self.available:
+            # All busy, wait a bit
+            time.sleep(0.5)
+            if not self.available:
+                # Still busy, create temp driver
+                return self._create_driver()
+        
+        return self.available.pop(0)
+    
+    def return_driver(self, driver):
+        """Return driver to pool"""
+        if driver in self.drivers:
+            self.available.append(driver)
+        else:
+            # Temp driver, close it
+            try:
+                driver.quit()
+            except:
+                pass
+    
+    def cleanup(self):
+        """Close all drivers"""
+        logger.info("🧹 Cleaning up Selenium drivers...")
+        for driver in self.drivers:
+            try:
+                driver.quit()
+            except:
+                pass
+        self.drivers.clear()
+        self.available.clear()
+
+# Global driver pool
+driver_pool = None
+
 # ==================== CHECKPOINT MANAGER ====================
 
 class CheckpointManager:
-    """Quản lý checkpoint và resume"""
-    
     def __init__(self, checkpoint_file=CHECKPOINT_FILE, data_file=CHECKPOINT_DATA):
         self.checkpoint_file = checkpoint_file
         self.data_file = data_file
@@ -253,27 +201,16 @@ class CheckpointManager:
         if os.path.exists(self.checkpoint_file):
             try:
                 with open(self.checkpoint_file, 'r') as f:
-                    checkpoint = json.load(f)
-                logger.info(f"📂 Found checkpoint: {checkpoint['processed']} URLs processed")
-                return checkpoint
-            except Exception as e:
-                logger.warning(f"⚠️  Failed to load checkpoint: {e}")
-        
-        return {
-            'processed': 0,
-            'total': 0,
-            'last_index': 0,
-            'start_time': time.time(),
-            'processed_urls': []
-        }
+                    return json.load(f)
+            except:
+                pass
+        return {'processed': 0, 'total': 0, 'processed_urls': []}
     
-    def save_checkpoint(self, processed, total, last_index, processed_urls, results_df=None):
+    def save_checkpoint(self, processed, total, processed_urls, results_df=None):
         checkpoint = {
             'processed': processed,
             'total': total,
-            'last_index': last_index,
             'timestamp': datetime.now().isoformat(),
-            'start_time': self.checkpoint.get('start_time', time.time()),
             'processed_urls': processed_urls[-1000:]
         }
         
@@ -284,21 +221,19 @@ class CheckpointManager:
             if results_df is not None and len(results_df) > 0:
                 results_df.to_csv(self.data_file, index=False)
             
-            logger.info(f"💾 Checkpoint saved: {processed}/{total} URLs")
+            logger.info(f"💾 Checkpoint: {processed}/{total} URLs")
         except Exception as e:
-            logger.error(f"❌ Failed to save checkpoint: {e}")
+            logger.error(f"❌ Checkpoint failed: {e}")
     
     def get_processed_urls(self):
         processed = set(self.checkpoint.get('processed_urls', []))
-        
         if os.path.exists(self.data_file):
             try:
                 df = pd.read_csv(self.data_file)
                 if 'url' in df.columns:
                     processed.update(df['url'].tolist())
-            except Exception as e:
-                logger.warning(f"⚠️  Failed to load checkpoint data: {e}")
-        
+            except:
+                pass
         return processed
     
     def clear_checkpoint(self):
@@ -307,29 +242,22 @@ class CheckpointManager:
                 os.remove(self.checkpoint_file)
             if os.path.exists(self.data_file):
                 os.remove(self.data_file)
-            logger.info("🗑️  Checkpoint cleared")
-        except Exception as e:
-            logger.warning(f"⚠️  Failed to clear checkpoint: {e}")
+        except:
+            pass
 
 # ==================== CONSTANTS ====================
 
-RISKY_TLDS = ['.tk', '.ml', '.ga', '.cf', '.gq', '.xyz', '.top', '.vip', 
-              '.online', '.club', '.cfd', '.loan', '.click', '.asia', '.ru', '.work', '.cn']
-
+RISKY_TLDS = ['.tk', '.ml', '.ga', '.cf', '.gq', '.xyz', '.top', '.vip']
 TRUSTED_ISSUERS = {'Google', 'Microsoft', 'DigiCert', 'Sectigo', 'GlobalSign', 
-                   'Amazon', 'Apple', 'Entrust', 'GeoTrust', 'Thawte', 
-                   'GoDaddy', 'VeriSign', 'GTS', "Let's Encrypt", 'Cloudflare'}
-
+                   'Amazon', 'Apple', "Let's Encrypt"}
 BRANDS = ['paypal', 'amazon', 'google', 'microsoft', 'apple', 'facebook', 
-          'netflix', 'vietcombank', 'mbbank', 'tpbank', 'binance', 'shopee', 'lazada', 'tiki']
-
-PHISHING_KEYWORDS = ['login', 'signin', 'verify', 'account', 'secure', 'update', 
-                     'banking', 'confirm', 'password', 'suspend', 'locked']
+          'vietcombank', 'mbbank', 'shopee', 'lazada']
+PHISHING_KEYWORDS = ['login', 'signin', 'verify', 'account', 'secure', 'update']
 
 # ==================== FEATURE EXTRACTOR ====================
 
-class AntiBlockFeatureExtractor:
-    """Feature extractor với anti-block mechanisms"""
+class HybridFeatureExtractor:
+    """Hybrid: Requests first, Selenium fallback"""
     
     def __init__(self, url):
         self.url = str(url).strip()
@@ -348,9 +276,10 @@ class AntiBlockFeatureExtractor:
         
         self.html = None
         self.soup = None
+        self.method_used = "none"
     
     def _entropy(self, text):
-        if not text or len(text) == 0:
+        if not text:
             return 0.0
         freq = Counter(text)
         length = len(text)
@@ -358,29 +287,72 @@ class AntiBlockFeatureExtractor:
     
     def _get_subdomain(self):
         parts = self.domain.split('.')
-        if len(parts) >= 3 and parts[-2] in ['com', 'co', 'net', 'org', 'edu', 'gov', 'ac']:
-            if len(parts) > 3:
-                return '.'.join(parts[:-3])
-            return ""
-        elif len(parts) > 2:
-            return '.'.join(parts[:-2])
-        return ""
+        if len(parts) >= 3 and parts[-2] in ['com', 'co', 'net', 'org', 'edu']:
+            return '.'.join(parts[:-3]) if len(parts) > 3 else ""
+        return '.'.join(parts[:-2]) if len(parts) > 2 else ""
     
-    def fetch_html(self):
-        """Fetch HTML với anti-block"""
-        if self.html:
-            return True
-        
+    def fetch_html_requests(self):
+        """Try with requests first (fast)"""
         try:
-            # Use session manager với retry
-            response = session_manager.get_with_retry(self.url)
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            }
+            response = requests.get(
+                self.url, 
+                headers=headers, 
+                timeout=REQUESTS_TIMEOUT,
+                verify=False,
+                allow_redirects=True
+            )
             
-            if response and response.status_code == 200:
+            if response.status_code == 200:
                 self.html = response.text
                 self.soup = BeautifulSoup(self.html, 'html.parser')
+                self.method_used = "requests"
                 return True
+        except:
+            pass
+        return False
+    
+    def fetch_html_selenium(self):
+        """Fallback to Selenium (slower but works)"""
+        if not SELENIUM_AVAILABLE or driver_pool is None:
+            return False
+        
+        driver = None
+        try:
+            driver = driver_pool.get_driver()
+            
+            # Navigate
+            driver.get(self.url)
+            
+            # Wait for page load
+            time.sleep(2)  # Simple wait, hoặc dùng WebDriverWait
+            
+            # Get HTML
+            self.html = driver.page_source
+            self.soup = BeautifulSoup(self.html, 'html.parser')
+            self.method_used = "selenium"
+            
+            driver_pool.return_driver(driver)
+            return True
+            
         except Exception as e:
-            logger.debug(f"Failed to fetch {self.url}: {str(e)}")
+            logger.debug(f"Selenium failed on {self.url}: {str(e)}")
+            if driver:
+                driver_pool.return_driver(driver)
+            return False
+    
+    def fetch_html(self):
+        """Hybrid: Try requests first, then Selenium"""
+        # Try requests first
+        if self.fetch_html_requests():
+            return True
+        
+        # Fallback to Selenium if enabled
+        if USE_SELENIUM_FOR_FAILED:
+            logger.info(f"🔄 Trying Selenium for: {self.url[:50]}...")
+            return self.fetch_html_selenium()
         
         return False
     
@@ -390,33 +362,29 @@ class AntiBlockFeatureExtractor:
             context.check_hostname = False
             context.verify_mode = ssl.CERT_NONE
             
-            with socket.create_connection((self.domain, 443), timeout=TIMEOUT_SOCKET) as sock:
+            with socket.create_connection((self.domain, 443), timeout=2) as sock:
                 with context.wrap_socket(sock, server_hostname=self.domain) as ssock:
                     cert = ssock.getpeercert()
                     not_before = datetime.strptime(cert['notBefore'], '%b %d %H:%M:%S %Y %Z')
                     not_after = datetime.strptime(cert['notAfter'], '%b %d %H:%M:%S %Y %Z')
-                    now = datetime.now()
                     
-                    cert_age = (now - not_before).days
-                    validity_period = (not_after - not_before).days
+                    cert_age = (datetime.now() - not_before).days
+                    validity = (not_after - not_before).days
                     
                     issuer = "Unknown"
                     if 'issuer' in cert:
                         for item in cert['issuer']:
-                            for key, value in item:
-                                if key in ['organizationName', 'O', 'commonName', 'CN'] and value:
-                                    issuer = value
+                            for k, v in item:
+                                if k in ['organizationName', 'O', 'commonName', 'CN']:
+                                    issuer = v
                                     break
-                            if issuer != "Unknown":
-                                break
                     
-                    return cert_age, validity_period, issuer
+                    return cert_age, validity, issuer
         except:
             return -1, -1, "Unknown"
     
     def extract_all_features(self):
-        """Extract all 27 features"""
-        url_length = len(self.url)
+        """Extract 27 features"""
         domain_length = len(self.domain)
         path_length = len(self.path) + len(self.query)
         
@@ -427,8 +395,9 @@ class AntiBlockFeatureExtractor:
         
         subdomain = self._get_subdomain()
         subdomain_level = subdomain.count('.') + 1 if subdomain else 0
-        entropy_subdomain = self._entropy(subdomain) if subdomain else 0.0
+        entropy_subdomain = self._entropy(subdomain)
         
+        url_length = len(self.url)
         num_digits = sum(c.isdigit() for c in self.url)
         digit_ratio = num_digits / url_length if url_length > 0 else 0
         special_chars = sum(not c.isalnum() for c in self.url)
@@ -446,7 +415,7 @@ class AntiBlockFeatureExtractor:
                 break
         
         cert_age, cert_validity, cert_issuer = self.get_ssl_info()
-        is_trusted_issuer = 1 if cert_issuer != "Unknown" and any(t.lower() in cert_issuer.lower() for t in TRUSTED_ISSUERS) else 0
+        is_trusted_issuer = 1 if cert_issuer != "Unknown" and any(t in cert_issuer for t in TRUSTED_ISSUERS) else 0
         cert_too_new = 1 if 0 <= cert_age < 30 else 0
         
         content_features = {'Has_External_Form': 0, 'Has_Submit_Button': 0, 'Has_Password_Field': 0,
@@ -462,10 +431,10 @@ class AntiBlockFeatureExtractor:
                 'Has_Submit_Button': 1 if self.soup.find(['input', 'button'], type=['submit', 'button']) else 0,
                 'Has_Password_Field': 1 if self.soup.find('input', type='password') else 0,
                 'Total_IFrames': len(self.soup.find_all('iframe')),
-                'Has_Hidden_IFrame': 1 if any('display:none' in str(i.get('style', '')).lower() or 
-                    str(i.get('width', '')) == '0' for i in self.soup.find_all('iframe')) else 0,
-                'Right_Click_Disabled': 1 if any(p in html_lower for p in ['event.button==2', 'contextmenu']) else 0,
-                'Has_Obfuscated_JS': 1 if any(p in html_lower for p in ['eval(', 'atob(', 'unescape(']) else 0,
+                'Has_Hidden_IFrame': 1 if any('display:none' in str(i.get('style', '')).lower() 
+                    for i in self.soup.find_all('iframe')) else 0,
+                'Right_Click_Disabled': 1 if 'contextmenu' in html_lower else 0,
+                'Has_Obfuscated_JS': 1 if any(p in html_lower for p in ['eval(', 'atob(']) else 0,
                 'Brand_Impersonation': 1 if any(b in html_lower and not self.domain.lower().endswith(f'{b}.com') 
                     for b in BRANDS) else 0
             }
@@ -481,13 +450,13 @@ class AntiBlockFeatureExtractor:
             'Has_Phishing_Keyword': has_phishing_keyword, 'Brand_In_Subdomain': brand_in_subdomain,
             'Certificate_Age': cert_age, 'Certificate_Validity_Days': cert_validity,
             'Cert_Too_New': cert_too_new, 'Is_Trusted_Issuer': is_trusted_issuer,
-            **content_features
+            **content_features,
+            'Fetch_Method': self.method_used  # Track method used
         }
 
 # ==================== PROCESSOR ====================
 
 def process_row_safe(row):
-    """Process with anti-block"""
     try:
         url = str(row.get('url', '')).strip()
         label = row.get('label', '')
@@ -495,13 +464,10 @@ def process_row_safe(row):
         if not url:
             return None
         
-        extractor = AntiBlockFeatureExtractor(url)
+        extractor = HybridFeatureExtractor(url)
         features = extractor.extract_all_features()
         
-        if str(label).lower() in ['bad', '1', 'phishing']:
-            features['label'] = 1
-        else:
-            features['label'] = 0
+        features['label'] = 1 if str(label).lower() in ['bad', '1', 'phishing'] else 0
         
         return features
     except Exception as e:
@@ -511,15 +477,15 @@ def process_row_safe(row):
 # ==================== MAIN ====================
 
 def main():
+    global driver_pool
+    
     print("="*80)
-    print(" ANTI-BLOCK FEATURE EXTRACTION SYSTEM ".center(80, "="))
+    print(" SELENIUM STEALTH FEATURE EXTRACTION ".center(80, "="))
     print("="*80)
     
-    logger.info("🛡️  Anti-block mechanisms enabled:")
-    logger.info(f"   • Random User-Agents: {len(USER_AGENTS)} agents")
-    logger.info(f"   • Random delays: {MIN_DELAY}s - {MAX_DELAY}s")
-    logger.info(f"   • Retry with backoff: {MAX_RETRIES} attempts")
-    logger.info(f"   • Proxy support: {'Enabled' if USE_PROXY else 'Disabled'}")
+    # Initialize Selenium pool
+    if SELENIUM_AVAILABLE and USE_SELENIUM_FOR_FAILED:
+        driver_pool = SeleniumDriverPool(SELENIUM_POOL_SIZE)
     
     checkpoint_mgr = CheckpointManager()
     
@@ -532,11 +498,8 @@ def main():
     
     processed_urls = checkpoint_mgr.get_processed_urls()
     if processed_urls:
-        logger.info(f"📂 Found {len(processed_urls):,} processed URLs")
-        df['url_lower'] = df['url'].str.lower().str.strip()
-        processed_lower = {u.lower().strip() for u in processed_urls}
-        df_todo = df[~df['url_lower'].isin(processed_lower)].drop('url_lower', axis=1)
-        
+        logger.info(f"📂 Resume: {len(processed_urls):,} already done")
+        df_todo = df[~df['url'].isin(processed_urls)]
         df_existing = pd.read_csv(checkpoint_mgr.data_file) if os.path.exists(checkpoint_mgr.data_file) else pd.DataFrame()
     else:
         df_todo = df
@@ -544,12 +507,13 @@ def main():
     
     if len(df_todo) == 0:
         logger.info("✅ All done!")
+        if driver_pool:
+            driver_pool.cleanup()
         return
     
     data = df_todo.to_dict('records')
     num_batches = (len(data) + BATCH_SIZE - 1) // BATCH_SIZE
     all_results = []
-    start_time = time.time()
     
     try:
         for i in range(num_batches):
@@ -558,40 +522,52 @@ def main():
             
             with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
                 futures = {executor.submit(process_row_safe, row): row for row in batch_data}
-                for future in tqdm(concurrent.futures.as_completed(futures), total=len(batch_data), 
-                                 desc=f"Batch {i+1}", leave=False):
+                for future in tqdm(concurrent.futures.as_completed(futures), total=len(batch_data), leave=False):
                     result = future.result()
                     if result:
                         all_results.append(result)
             
-            logger.info(f"   ✅ Success: {len(all_results)}/{len(data)}")
+            logger.info(f"   ✅ Success: {len(all_results)}")
             
             if len(all_results) % CHECKPOINT_INTERVAL < BATCH_SIZE:
                 df_combined = pd.concat([df_existing, pd.DataFrame(all_results)], ignore_index=True) if len(df_existing) > 0 else pd.DataFrame(all_results)
-                checkpoint_mgr.save_checkpoint(len(df_combined), len(df), i*BATCH_SIZE, 
-                                             df_combined['url'].tolist(), df_combined)
+                checkpoint_mgr.save_checkpoint(len(df_combined), len(df), df_combined['url'].tolist(), df_combined)
     
     except KeyboardInterrupt:
-        logger.warning("\n⚠️  Interrupted! Saving...")
+        logger.warning("\n⚠️  Interrupted!")
         if all_results:
             df_combined = pd.concat([df_existing, pd.DataFrame(all_results)], ignore_index=True) if len(df_existing) > 0 else pd.DataFrame(all_results)
-            checkpoint_mgr.save_checkpoint(len(df_combined), len(df), len(all_results),
-                                         df_combined['url'].tolist(), df_combined)
+            checkpoint_mgr.save_checkpoint(len(df_combined), len(df), df_combined['url'].tolist(), df_combined)
+        if driver_pool:
+            driver_pool.cleanup()
         return
     
     logger.info("\n✅ COMPLETED!")
     
     final_df = pd.concat([df_existing, pd.DataFrame(all_results)], ignore_index=True) if len(df_existing) > 0 else pd.DataFrame(all_results)
+    
+    # Reorder columns
     cols = list(final_df.columns)
-    if 'url' in cols:
-        cols.insert(0, cols.pop(cols.index('url')))
-    if 'label' in cols:
-        cols.insert(1, cols.pop(cols.index('label')))
+    for col in ['url', 'label']:
+        if col in cols:
+            cols.insert(0, cols.pop(cols.index(col)))
     final_df = final_df[cols].drop_duplicates(subset=['url'], keep='first')
+    
+    # Show stats
+    if 'Fetch_Method' in final_df.columns:
+        method_stats = final_df['Fetch_Method'].value_counts()
+        logger.info(f"\n📊 Fetch Methods:")
+        for method, count in method_stats.items():
+            logger.info(f"   {method}: {count} URLs")
+        final_df = final_df.drop('Fetch_Method', axis=1)
     
     final_df.to_csv(OUTPUT_FILE, index=False)
     logger.info(f"💾 Saved: {OUTPUT_FILE}")
     checkpoint_mgr.clear_checkpoint()
+    
+    # Cleanup
+    if driver_pool:
+        driver_pool.cleanup()
 
 if __name__ == "__main__":
     main()
