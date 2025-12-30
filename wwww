@@ -1,8 +1,117 @@
-Traceback (most recent call last):
-  File "/home/kali/phishing_extractor/hahaha.py", line 10, in <module>
-    import undetected_chromedriver as uc
-  File "/home/kali/phishing_extractor/venv/lib/python3.13/site-packages/undetected_chromedriver/__init__.py", line 44, in <module>
-    from .patcher import IS_POSIX
-  File "/home/kali/phishing_extractor/venv/lib/python3.13/site-packages/undetected_chromedriver/patcher.py", line 4, in <module>
-    from distutils.version import LooseVersion
-ModuleNotFoundError: No module named 'distutils'
+import pandas as pd
+import numpy as np
+import seaborn as sns
+import matplotlib.pyplot as plt
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import classification_report, accuracy_score, confusion_matrix
+
+# --- CẤU HÌNH ---
+# Đổi tên file này thành file bạn vừa sửa xong (VD: DATA_TRAIN_ULTIMATE.csv)
+DATA_FILE = 'DATA_TRAIN_ULTIMATE.csv' 
+
+def main():
+    print("📊 ĐANG TẢI DỮ LIỆU ĐỂ KIỂM TRA...")
+    try:
+        df = pd.read_csv(DATA_FILE)
+        print(f"✅ Đã tải: {len(df)} dòng.")
+    except Exception as e:
+        print(f"❌ Lỗi: {e}")
+        return
+
+    # --- 1. KIỂM TRA: DỮ LIỆU ĐỘNG CỦA ÔNG LỚN ---
+    # Mục tiêu: Chứng minh Google/FB không còn bị toàn số 0
+    print("\n" + "="*60)
+    print("🔍 KIỂM TRA 1: HỒI SINH DỮ LIỆU (IMPUTATION CHECK)")
+    print("-" * 60)
+    
+    # Lọc ra các dòng Google/Facebook (Dựa trên URL nếu có, hoặc đoán)
+    if 'url' in df.columns:
+        google_rows = df[df['url'].str.contains('google.com', na=False, case=False)]
+        print(f"   - Tìm thấy {len(google_rows)} dòng chứa 'google.com'")
+        
+        if len(google_rows) > 0:
+            avg_iframe = google_rows['Total_IFrames'].mean()
+            avg_hidden = google_rows['Has_Hidden_IFrame'].mean()
+            print(f"   - Trung bình Iframe của Google: {avg_iframe:.2f} (Kỳ vọng > 0)")
+            print(f"   - Trung bình Hidden Iframe:     {avg_hidden:.2f} (Kỳ vọng = 0, vì đã được tha)")
+            
+            if avg_iframe > 0:
+                print("   => ✅ THÀNH CÔNG: Dữ liệu Google đã được hồi sinh!")
+            else:
+                print("   => ❌ THẤT BẠI: Dữ liệu Google vẫn bằng 0. Kiểm tra lại code sửa.")
+    else:
+        print("   (Không tìm thấy cột 'url' để kiểm tra cụ thể, bỏ qua bước này)")
+
+    # --- 2. KIỂM TRA: PHÂN BỐ DỮ LIỆU (DATA DISTRIBUTION) ---
+    print("\n" + "="*60)
+    print("🔍 KIỂM TRA 2: SỰ KHÁC BIỆT GIỮA THẬT (0) VÀ GIẢ (1)")
+    print("-" * 60)
+    
+    # Chỉ lấy các cột số
+    numeric_cols = df.select_dtypes(include=[np.number]).columns
+    
+    # So sánh trung bình của một số Feature quan trọng
+    check_feats = ['Total_IFrames', 'Has_External_Form', 'Brand_In_Subdomain', 'Certificate_Age']
+    
+    print(f"{'FEATURE':<25} | {'SAFE (0)':<10} | {'PHISHING (1)':<12} | {'NHẬN XÉT'}")
+    print("-" * 65)
+    
+    for col in check_feats:
+        if col in df.columns:
+            mean_safe = df[df['label']==0][col].mean()
+            mean_phish = df[df['label']==1][col].mean()
+            
+            diff = "Giống nhau"
+            if mean_safe > mean_phish * 1.5: diff = "Safe > Phish"
+            if mean_phish > mean_safe * 1.5: diff = "Phish > Safe"
+            
+            print(f"{col:<25} | {mean_safe:<10.4f} | {mean_phish:<12.4f} | {diff}")
+
+    # --- 3. HUẤN LUYỆN THỬ & ĐÁNH GIÁ (MODEL EVALUATION) ---
+    print("\n" + "="*60)
+    print("🤖 KIỂM TRA 3: HUẤN LUYỆN THỬ & FEATURE IMPORTANCE")
+    print("-" * 60)
+    
+    # Chuẩn bị dữ liệu
+    drop_cols = ['url', 'label', 'temp_idx']
+    X = df.drop(columns=[c for c in drop_cols if c in df.columns], errors='ignore')
+    y = df['label']
+    
+    # Split
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+    
+    # Train Random Forest (Nhanh và mạnh)
+    rf = RandomForestClassifier(n_estimators=50, random_state=42)
+    rf.fit(X_train, y_train)
+    
+    # Predict
+    y_pred = rf.predict(X_test)
+    acc = accuracy_score(y_test, y_pred)
+    
+    print(f"✅ Accuracy (Độ chính xác): {acc:.2%}")
+    print("\n📊 BẢNG XẾP HẠNG ĐẶC TRƯNG QUAN TRỌNG NHẤT:")
+    
+    # Lấy Feature Importance
+    importances = rf.feature_importances_
+    indices = np.argsort(importances)[::-1]
+    
+    print(f"{'RANK':<5} | {'FEATURE NAME':<30} | {'IMPORTANCE'}")
+    print("-" * 50)
+    
+    for f in range(min(20, len(X.columns))): # Top 20
+        idx = indices[f]
+        print(f"{f+1:<5} | {X.columns[idx]:<30} | {importances[idx]:.4f}")
+        
+    print("-" * 50)
+    
+    # Check xem Dynamic Feature có ngoi lên không
+    dynamic_feats = ['Total_IFrames', 'Has_Hidden_IFrame', 'Has_External_Form']
+    print("\n👀 VỊ TRÍ CỦA CÁC ĐẶC TRƯNG ĐỘNG:")
+    for feat in dynamic_feats:
+        if feat in X.columns:
+            rank = list(X.columns[indices]).index(feat) + 1
+            print(f"   - {feat}: Hạng {rank}/{len(X.columns)}")
+
+if __name__ == "__main__":
+    main()
