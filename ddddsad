@@ -1,14 +1,68 @@
-# 1. Cài đặt các gói hỗ trợ
-sudo apt update && sudo apt install -y curl gnupg
+import pandas as pd
+import requests
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from tqdm import tqdm
+import time
 
-# 2. Thêm Repo của Cloudflare (Dùng bản Bookworm cho Kali mới nhất)
-curl -fsSL https://pkg.cloudflareclient.com/pubkey.gpg | sudo gpg --yes --dearmor --output /usr/share/keyrings/cloudflare-warp-archive-keyring.gpg
-echo "deb [signed-by=/usr/share/keyrings/cloudflare-warp-archive-keyring.gpg] https://pkg.cloudflareclient.com/ bookworm main" | sudo tee /etc/apt/sources.list.d/cloudflare-client.list
+# --- CẤU HÌNH ---
+INPUT_FILE = 'dataset_after_merge_age.csv' # File đã gộp Domain Age
+OUTPUT_FILE = 'dataset_final_with_redirect.csv'
+MAX_WORKERS = 20  # Có thể để cao (20-30) vì chỉ check header, rất nhẹ CPU
+TIMEOUT = 5       # Link nào sau 5s không hồi đáp thì bỏ qua cho nhanh
 
-# 3. Cập nhật và cài đặt lại
-sudo apt update
-sudo apt install cloudflare-warp -y
+def check_is_redirected(url):
+    """Kiểm tra xem URL có bị redirect đến domain khác không"""
+    try:
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+        # allow_redirects=True để requests tự đuổi theo đến đích cuối cùng
+        response = requests.head(url, headers=headers, allow_redirects=True, timeout=TIMEOUT)
+        
+        final_url = response.url.strip('/')
+        original_url = url.strip('/')
+        
+        # So sánh URL cuối cùng với URL ban đầu
+        if final_url != original_url:
+            return 1
+        return 0
+    except:
+        # Nếu link chết, timeout hoặc lỗi DNS, trả về -1 (đánh dấu dữ liệu lỗi)
+        return -1
 
-# 4. Chạy lệnh đăng ký (Lần này sẽ nhận lệnh)
-warp-cli registration new
-warp-cli connect
+def process_row(row_data):
+    index, url = row_data
+    result = check_is_redirected(url)
+    return index, result
+
+def main():
+    # 1. Load Data
+    df = pd.read_csv(INPUT_FILE)
+    
+    # Khởi tạo cột nếu chưa có
+    if 'Is_Redirected' not in df.columns:
+        df['Is_Redirected'] = -2 # -2 nghĩa là chưa xử lý
+
+    # Lọc danh sách cần quét (bỏ qua những cái đã có kết quả hoặc link lỗi)
+    to_process = df[df['Is_Redirected'] == -2]
+    tasks = [(idx, row['url']) for idx, row in to_process.iterrows()]
+
+    print(f"🚀 Đang quét Redirect cho {len(tasks)} mẫu với {MAX_WORKERS} luồng...")
+    
+
+    # 2. Chạy đa luồng
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+        futures = {executor.submit(process_row, task): task for task in tasks}
+        
+        for i, future in enumerate(tqdm(as_completed(futures), total=len(futures))):
+            index, result = future.result()
+            df.at[index, 'Is_Redirected'] = result
+            
+            # Lưu mỗi 500 dòng cho an toàn
+            if i > 0 and i % 500 == 0:
+                df.to_csv(OUTPUT_FILE, index=False)
+
+    # 3. Kết thúc
+    df.to_csv(OUTPUT_FILE, index=False)
+    print(f"✅ Đã trích xuất xong đặc trưng Is_Redirected!")
+
+if __name__ == "__main__":
+    main()
