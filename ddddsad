@@ -5,7 +5,7 @@ from tqdm import tqdm
 import time
 
 # --- CẤU HÌNH ---
-INPUT_FILE = 'dataset_after_merge_age.csv' # File đã gộp Domain Age
+INPUT_FILE = 'final_train_dataset_v9_4_fixed.csv' # File đã gộp Domain Age
 OUTPUT_FILE = 'dataset_final_with_redirect.csv'
 MAX_WORKERS = 20  # Có thể để cao (20-30) vì chỉ check header, rất nhẹ CPU
 TIMEOUT = 5       # Link nào sau 5s không hồi đáp thì bỏ qua cho nhanh
