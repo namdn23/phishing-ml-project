@@ -1,55 +1,100 @@
-📊 ĐANG TẢI DỮ LIỆU ĐỂ KIỂM TRA...
-✅ Đã tải: 47623 dòng.
+import pandas as pd
+import tldextract
+import requests
+import time
+import os
+from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from tqdm import tqdm
 
-============================================================
-🔍 KIỂM TRA 1: HỒI SINH DỮ LIỆU (IMPUTATION CHECK)
-------------------------------------------------------------
-   - Tìm thấy 314 dòng chứa 'google.com'
-   - Trung bình Iframe của Google: 0.03 (Kỳ vọng > 0)
-   - Trung bình Hidden Iframe:     0.00 (Kỳ vọng = 0, vì đã được tha)
-   => ✅ THÀNH CÔNG: Dữ liệu Google đã được hồi sinh!
+# ==================== CẤU HÌNH CHIA DATA ====================
+INPUT_FILE = 'final_train_dataset_v9_4_fixed.csv'
+# Đặt tên file output khác nhau cho máy thật và máy ảo (vd: part1.csv và part2.csv)
+OUTPUT_FILE = 'dataset_part_result.csv' 
 
-============================================================
-🔍 KIỂM TRA 2: SỰ KHÁC BIỆT GIỮA THẬT (0) VÀ GIẢ (1)
-------------------------------------------------------------
-FEATURE                   | SAFE (0)   | PHISHING (1) | NHẬN XÉT
------------------------------------------------------------------
-Total_IFrames             | 0.6098     | 0.1456       | Safe > Phish
-Has_External_Form         | 0.1080     | 0.0649       | Safe > Phish
-Brand_In_Subdomain        | 0.0000     | 0.0038       | Phish > Safe
-Certificate_Age           | 67.4697    | 187.4307     | Phish > Safe
+# Chia đoạn: Máy 1 (0 -> 23500), Máy 2 (23501 -> 47000)
+START_IDX = 23502  
+END_IDX = 48685 
 
-============================================================
-🤖 KIỂM TRA 3: HUẤN LUYỆN THỬ & FEATURE IMPORTANCE
-------------------------------------------------------------
-✅ Accuracy (Độ chính xác): 93.15%
+MAX_WORKERS = 5   # Số luồng (Intel U5 dư sức chạy 5-8 luồng)
+SAVE_INTERVAL = 50 # Lưu file sau mỗi 50 dòng để tránh mất data nếu crash
+# ============================================================
 
-📊 BẢNG XẾP HẠNG ĐẶC TRƯNG QUAN TRỌNG NHẤT:
-RANK  | FEATURE NAME                   | IMPORTANCE
---------------------------------------------------
-1     | Special_Char_Ratio             | 0.1363
-2     | Path_Length                    | 0.1204
-3     | Domain_Length                  | 0.1198
-4     | Certificate_Age                | 0.1103
-5     | Num_Slashes                    | 0.1038
-6     | Certificate_Validity_Days      | 0.0656
-7     | Brand_Impersonation            | 0.0638
-8     | Has_Submit_Button              | 0.0511
-9     | Digit_Ratio                    | 0.0499
-10    | Subdomain_Level                | 0.0416
-11    | Total_IFrames                  | 0.0297
-12    | Num_Dots                       | 0.0271
-13    | Is_Trusted_Issuer              | 0.0202
-14    | Entropy_Subdomain              | 0.0177
-15    | Num_Hyphens                    | 0.0084
-16    | Has_Hidden_IFrame              | 0.0071
-17    | Has_External_Form              | 0.0062
-18    | Cert_Too_New                   | 0.0057
-19    | Has_Password_Field             | 0.0036
-20    | Has_Obfuscated_JS              | 0.0033
---------------------------------------------------
+class RDAPScanner:
+    def __init__(self):
+        self.endpoints = [
+            "https://rdap.verisign.com/com/v1/domain/",
+            "https://rdap.org/domain/",
+            "https://rdap.nic.cz/domain/"
+        ]
 
-👀 VỊ TRÍ CỦA CÁC ĐẶC TRƯNG ĐỘNG:
-   - Total_IFrames: Hạng 11/27
-   - Has_Hidden_IFrame: Hạng 16/27
-   - Has_External_Form: Hạng 17/27
+    def get_age(self, url):
+        try:
+            ext = tldextract.extract(url)
+            domain = f"{ext.domain}.{ext.suffix}".lower()
+            if not ext.domain: return -1
+
+            for base in self.endpoints:
+                try:
+                    # Timeout thấp (5s) để không bị kẹt ở link chết
+                    res = requests.get(base + domain, timeout=5)
+                    if res.status_code == 200:
+                        events = res.json().get('events', [])
+                        for e in events:
+                            if e.get('eventAction') in ['registration', 'created']:
+                                dt = datetime.strptime(e.get('eventDate')[:10], '%Y-%m-%d')
+                                return (datetime.now() - dt).days
+                    elif res.status_code == 429: # Bị giới hạn lượt truy cập
+                        time.sleep(5) 
+                except: continue
+            return -1
+        except: return -1
+
+def process_row(row_data):
+    idx, url = row_data
+    scanner = RDAPScanner()
+    age = scanner.get_age(url)
+    return idx, age
+
+def main():
+    # 1. Đọc và cắt đoạn dữ liệu
+    if not os.path.exists(INPUT_FILE):
+        print(f"❌ Không tìm thấy file {INPUT_FILE}"); return
+        
+    full_df = pd.read_csv(INPUT_FILE)
+    df = full_df.iloc[START_IDX:END_IDX].copy()
+    
+    if 'domain_age' not in df.columns:
+        df['domain_age'] = -1
+
+    # Lọc những dòng chưa quét (phòng trường hợp ông tắt đi bật lại)
+    to_process = df[df['domain_age'] == -1]
+    tasks = [(idx, row['url']) for idx, row in to_process.iterrows()]
+    
+    print(f"🚀 [PART {START_IDX}-{END_IDX}] Đang quét {len(tasks)} link bằng {MAX_WORKERS} luồng...")
+    
+
+    # 2. Chạy đa luồng xuyên đêm
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+        futures = {executor.submit(process_row, t): t for t in tasks}
+        
+        try:
+            for i, future in enumerate(tqdm(as_completed(futures), total=len(futures))):
+                idx, age = future.result()
+                df.at[idx, 'domain_age'] = age
+                
+                # Lưu định kỳ
+                if i > 0 and i % SAVE_INTERVAL == 0:
+                    df.to_csv(OUTPUT_FILE, index=False)
+                
+                # Giãn cách nhẹ để bảo vệ IP
+                if i % MAX_WORKERS == 0:
+                    time.sleep(1)
+        except KeyboardInterrupt:
+            print("\n⚠️ Đang dừng và lưu dữ liệu...")
+        finally:
+            df.to_csv(OUTPUT_FILE, index=False)
+            print(f"✅ Đã lưu kết quả vào {OUTPUT_FILE}")
+
+if __name__ == "__main__":
+    main()
