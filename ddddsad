@@ -1,77 +1,14 @@
-import pandas as pd
-import numpy as np
-import seaborn as sns
-import matplotlib.pyplot as plt
+# 1. Cài đặt các gói hỗ trợ
+sudo apt update && sudo apt install -y curl gnupg
 
-# --- CẤU HÌNH ---
-# Hãy thay bằng tên file mới nhất của bạn (file fixed hoặc file gốc)
-FILE_PATH = 'dataset_final_train_fixed.csv' 
+# 2. Thêm Repo của Cloudflare (Dùng bản Bookworm cho Kali mới nhất)
+curl -fsSL https://pkg.cloudflareclient.com/pubkey.gpg | sudo gpg --yes --dearmor --output /usr/share/keyrings/cloudflare-warp-archive-keyring.gpg
+echo "deb [signed-by=/usr/share/keyrings/cloudflare-warp-archive-keyring.gpg] https://pkg.cloudflareclient.com/ bookworm main" | sudo tee /etc/apt/sources.list.d/cloudflare-client.list
 
-def analyze_all_features():
-    print(f"🕵️ BẮT ĐẦU PHÂN TÍCH TOÀN BỘ 29 FEATURES...")
-    print("="*80)
+# 3. Cập nhật và cài đặt lại
+sudo apt update
+sudo apt install cloudflare-warp -y
 
-    try:
-        df = pd.read_csv(FILE_PATH)
-    except:
-        print(f"❌ Không tìm thấy file {FILE_PATH}")
-        return
-
-    # 1. TÁCH DỮ LIỆU
-    # Bỏ cột URL vì nó là text, không tính toán thống kê được
-    if 'url' in df.columns:
-        df_numeric = df.drop(columns=['url'])
-    else:
-        df_numeric = df
-
-    # 2. TÌM FEATURE "CHẾT" (Constant Columns)
-    # Feature chết là feature mà tất cả các dòng đều có giá trị giống hệt nhau -> Vô dụng
-    print("\n💀 DANH SÁCH FEATURE 'CHẾT' (Cần xóa bỏ):")
-    dead_features = []
-    for col in df_numeric.columns:
-        if df_numeric[col].nunique() <= 1:
-            val = df_numeric[col].iloc[0]
-            print(f"   ❌ {col.ljust(30)}: Giá trị duy nhất là {val}")
-            dead_features.append(col)
-    
-    if not dead_features:
-        print("   ✅ Không có feature nào chết hoàn toàn!")
-
-    # 3. KIỂM TRA ĐỘ QUAN TRỌNG (CORRELATION MATRIX)
-    # Xem feature nào tương quan mạnh nhất với Label (Phishing)
-    print("\n🏆 TOP 30 FEATURE QUAN TRỌNG NHẤT (Dựa trên tương quan):")
-    if 'label' in df_numeric.columns:
-        # Tính tương quan tuyệt đối
-        corr = df_numeric.corrwith(df_numeric['label']).abs().sort_values(ascending=False)
-        # Bỏ dòng label (tương quan với chính nó là 1)
-        top_features = corr.drop('label').head(30)
-        
-        for feature, score in top_features.items():
-            stars = ""
-            if score > 0.4: stars = "🔥🔥🔥 (Cực mạnh)"
-            elif score > 0.2: stars = "🔥🔥 (Mạnh)"
-            elif score > 0.1: stars = "🔥 (Khá)"
-            else: stars = "(Trung bình)"
-            
-            print(f"   ★ {feature.ljust(30)}: {score:.4f} {stars}")
-
-    # 4. KIỂM TRA SSL CỤ THỂ
-    print("\n🛡️ TÌNH TRẠNG SSL:")
-    if 'Certificate_Age' in df.columns:
-        ssl_fail_count = len(df[df['Certificate_Age'] == -1])
-        print(f"   - Số dòng bị lỗi SSL (-1): {ssl_fail_count:,} / {len(df):,} dòng")
-        if ssl_fail_count == len(df):
-            print("   ⚠️  KẾT LUẬN: SSL hỏng toàn bộ -> Sẽ bị xóa khi train.")
-        else:
-            print("   ✅ KẾT LUẬN: Đã cứu được một phần SSL.")
-
-    # 5. KẾT LUẬN CUỐI CÙNG
-    print("="*80)
-    print("📢 LỜI KHUYÊN CHO BẠN:")
-    
-    cols_to_drop = ['url', 'Fetch_Method'] + dead_features
-    print(f"1. Trước khi train, hãy xóa các cột sau: {cols_to_drop}")
-    print(f"2. Các feature còn lại ({len(df.columns) - len(cols_to_drop)}) đủ mạnh để đạt độ chính xác cao.")
-
-if __name__ == "__main__":
-    analyze_all_features()
+# 4. Chạy lệnh đăng ký (Lần này sẽ nhận lệnh)
+warp-cli registration new
+warp-cli connect
